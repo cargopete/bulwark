@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pass 1: Reconnaissance
+# DOYRAN — Pass 1: Reconnaissance
 # ════════════════════════════════════════════════════════════════════════
 # Entirely deterministic. No AI. Produces the structural foundation
 # that all subsequent passes consume.

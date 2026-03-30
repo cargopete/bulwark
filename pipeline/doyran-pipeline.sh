@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pipeline Orchestrator
+# DOYRAN — Pipeline Orchestrator
 # ════════════════════════════════════════════════════════════════════════
 # Runs the six-pass audit pipeline sequentially.
 #
@@ -80,7 +80,7 @@ cat << 'BANNER'
     ║   ██████╔╝╚██████╔╝   ██║   ██║  ██║██║  ██║██║ ╚████║   ║
     ║   ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ║
     ║                                                           ║
-    ║   v2 — Multi-Pass Smart Contract Audit Pipeline           ║
+    ║   Multi-Pass Smart Contract Audit Pipeline                ║
     ║   The Graph Protocol                                      ║
     ║                                                           ║
     ╚═══════════════════════════════════════════════════════════╝

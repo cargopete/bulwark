@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pass 5: Formal Verification (STUB)
+# DOYRAN — Pass 5: Formal Verification (STUB)
 # ════════════════════════════════════════════════════════════════════════
 # Bounded model checking via Halmos on critical properties:
 #   - P-10 (provider-first slashing) — most critical

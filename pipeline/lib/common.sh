@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared utilities for the doyran v2 pipeline.
+# Shared utilities for the doyran pipeline.
 # Source this file from any pass script: source "$(dirname "$0")/lib/common.sh"
 
 set -euo pipefail

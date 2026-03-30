@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pass 2: Multi-Agent Adversarial Analysis
+# DOYRAN — Pass 2: Multi-Agent Adversarial Analysis
 # ════════════════════════════════════════════════════════════════════════
 # Three independent Claude Code sessions run in parallel:
 #   RED agent  — attacker persona, exploit-focused

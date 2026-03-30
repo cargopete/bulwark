@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: doyran-v2
+    container_name: doyran
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUDIT_TARGET=${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}
@@ -18,7 +18,7 @@ services:
       # - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
     stdin_open: true
     tty: true
-    # v2 resource requirements (up from 8G/4CPU in v1)
+    # Resource requirements for multi-agent pipeline
     deploy:
       resources:
         limits:

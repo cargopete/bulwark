@@ -1,4 +1,4 @@
-# Doyran v2
+# Doyran
 
 Multi-pass, multi-agent smart contract audit pipeline for The Graph Protocol.
 One Docker command to get a six-pass security analysis with adversarial AI agents,

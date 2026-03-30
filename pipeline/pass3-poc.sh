@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pass 3: PoC Generation & Validation (STUB)
+# DOYRAN — Pass 3: PoC Generation & Validation (STUB)
 # ════════════════════════════════════════════════════════════════════════
 # "No PoC, no finding" gate. For each finding from Pass 2, attempt to
 # write a Foundry PoC, compile it, and run it.

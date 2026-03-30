@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN v2 — Pass 4: Fuzzing Campaign (STUB)
+# DOYRAN — Pass 4: Fuzzing Campaign (STUB)
 # ════════════════════════════════════════════════════════════════════════
 # Auto-generates invariant tests from PROPERTIES.md, runs them via:
 #   - Foundry invariant tests (fast, 10-minute run)
