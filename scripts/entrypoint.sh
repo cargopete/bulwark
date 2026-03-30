@@ -11,12 +11,20 @@ echo "║  Trail of Bits Skills + forefy/.context + Slither        ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
-# ── Check API key ────────────────────────────────────────────────────
+# ── Check Claude Code auth ────────────────────────────────────────────
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "⚠  ANTHROPIC_API_KEY not set — Claude Code will not work."
-    echo "   Static analysis tools (Slither, Forge) still available."
-    echo "   Set it in .env or pass via: -e ANTHROPIC_API_KEY=sk-ant-..."
-    echo ""
+    # Check if user has an existing Claude Code login (Max/Team/Enterprise)
+    if [ -f "/home/auditor/.claude/.credentials.json" ] || [ -f "/home/auditor/.claude-auth/.credentials.json" ]; then
+        echo "✓  Claude Code authenticated via existing login."
+    else
+        echo "⚠  Claude Code not authenticated."
+        echo "   Static analysis tools (Slither, Forge) still available."
+        echo ""
+        echo "   To authenticate, either:"
+        echo "     a) Set ANTHROPIC_API_KEY in .env (API key auth)"
+        echo "     b) Run 'claude login' inside the container (Max/Team/Enterprise)"
+        echo ""
+    fi
 fi
 
 # ── Clone or update target repo ─────────────────────────────────────

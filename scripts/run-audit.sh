@@ -18,11 +18,19 @@ echo "╚═══════════════════════�
 echo ""
 
 # ── Preflight checks ────────────────────────────────────────────────
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "✗ ANTHROPIC_API_KEY not set. Cannot run AI audit phase."
-    echo "  Set it in .env or: export ANTHROPIC_API_KEY=sk-ant-..."
+CLAUDE_AUTH=false
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    CLAUDE_AUTH=true
+elif [ -f "/home/auditor/.claude/.credentials.json" ] || [ -f "/home/auditor/.claude-auth/.credentials.json" ]; then
+    CLAUDE_AUTH=true
+fi
+
+if [ "$CLAUDE_AUTH" = false ]; then
+    echo "⚠  Claude Code not authenticated. AI audit phase will be skipped."
+    echo "   Authenticate via: export ANTHROPIC_API_KEY=sk-ant-..."
+    echo "   Or run: claude login (Max/Team/Enterprise)"
     echo ""
-    echo "  Running static analysis only..."
+    echo "   Running static analysis only..."
     echo ""
 fi
 
@@ -93,11 +101,11 @@ echo "━━━ Phase 1 Complete ━━━"
 echo ""
 
 # ── Phase 2: AI Deep Audit ───────────────────────────────────────────
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "Skipping Phase 2 (no API key)."
+if [ "$CLAUDE_AUTH" = false ]; then
+    echo "Skipping Phase 2 (Claude Code not authenticated)."
     echo ""
     echo "To run AI analysis manually:"
-    echo "  export ANTHROPIC_API_KEY=sk-ant-..."
+    echo "  export ANTHROPIC_API_KEY=sk-ant-...  (or: claude login)"
     echo "  claude"
     echo ""
     echo "Then paste the audit prompt from: /home/auditor/scripts/audit-prompt.txt"

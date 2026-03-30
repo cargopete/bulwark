@@ -12,8 +12,10 @@ services:
     volumes:
       # Persist audit outputs between runs
       - audit-outputs:/home/auditor/audits
-      # Persist Claude conversation history
+      # Persist Claude auth and conversation history
       - claude-history:/home/auditor/.claude
+      # Optional: mount host Claude auth for licensed users (uncomment below)
+      # - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
     stdin_open: true
     tty: true
     # Limit resources to prevent runaway processes

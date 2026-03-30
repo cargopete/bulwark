@@ -16,25 +16,31 @@ static analysis tools with AI-augmented security review via Claude Code.
 ## Quick Start
 
 ```bash
-# 1. Copy and configure environment
-cp .env.example .env
-# Edit .env — add your ANTHROPIC_API_KEY
-
-# 2. Build and start
+# 1. Build and start
 docker compose up --build -d
 
-# 3. Enter the audit environment
+# 2. Enter the audit environment
 docker compose exec -it audit-env bash
 
-# 4. Inside the container — three options:
+# 3. Authenticate Claude Code (pick one):
 
-# Option A: Static analysis only (no API key needed)
+# Option A: API key (pay per token)
+export ANTHROPIC_API_KEY=sk-ant-...
+# Or add to .env before step 1: cp .env.example .env && edit .env
+
+# Option B: Existing Claude Code license (Max/Team/Enterprise)
+claude login
+# Or mount host auth — uncomment the volume line in docker-compose.yml
+
+# 4. Run:
+
+# Static analysis only (no auth needed)
 ~/scripts/run-slither.sh
 
-# Option B: Full automated audit workflow
+# Full automated audit workflow
 ~/scripts/run-audit.sh
 
-# Option C: Interactive Claude Code session
+# Interactive Claude Code session
 claude
 ```
 
@@ -51,7 +57,7 @@ claude
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | For AI features | — | Claude API key |
+| `ANTHROPIC_API_KEY` | For AI features* | — | Claude API key (*or use `claude login` for Max/Team/Enterprise) |
 | `AUDIT_TARGET` | No | graphprotocol/contracts | Git repo URL to audit |
 | `AUDIT_BRANCH` | No | `main` | Branch to check out |
 | `AUDIT_SCOPE` | No | `packages/horizon packages/subgraph-service` | Packages to focus on |
