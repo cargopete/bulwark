@@ -64,7 +64,7 @@ ENV PATH="/home/auditor/.foundry/bin:${PATH}"
 
 # ── Claude Code (native installer, as auditor user) ─────────────────
 RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/home/auditor/.claude/bin:${PATH}"
+ENV PATH="/home/auditor/.local/bin:${PATH}"
 
 # ── Directory structure ──────────────────────────────────────────────
 RUN mkdir -p \
