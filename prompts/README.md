@@ -39,6 +39,6 @@ Agents write their findings directly to `audit-workspace/findings/<agent>-raw.js
 
 - `halmos-generator.md` — Generates Halmos symbolic tests for bounded model checking. Targets P-10, P-15, P-19, P-1, P-16. Uses `check_` prefix, `vm.assume()` for constraints.
 
-## Pass 6 (TODO)
+## Pass 6
 
-- `adversarial-reviewer.md` — Final review, challenges all conclusions
+- `adversarial-reviewer.md` — Last line of defence. Challenges verified properties, severity ratings, discarded findings. Identifies compound attacks and blind spots. Assembles final report.
