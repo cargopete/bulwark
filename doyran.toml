@@ -18,6 +18,9 @@ math_sensitive = [
     "PaymentsEscrow",
 ]
 
+# Claude model for AI passes: "haiku" (cheapest), "sonnet", or "opus"
+model = "haiku"
+
 [workspace]
 path = "audit-workspace"
 

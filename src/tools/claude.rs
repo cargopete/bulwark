@@ -9,6 +9,8 @@ pub struct ClaudeSession {
     pub max_turns: u32,
     pub working_dir: PathBuf,
     pub log_file: PathBuf,
+    /// Model to use (e.g. "haiku", "sonnet", "opus"). Passed as `--model`.
+    pub model: Option<String>,
 }
 
 /// Result of a completed Claude session.
@@ -20,12 +22,18 @@ pub struct ClaudeOutput {
 impl ClaudeSession {
     /// Run the Claude session, writing stdout+stderr to the log file.
     pub async fn run(&self) -> Result<ClaudeOutput> {
-        let output = Command::new(&self.claude_bin)
-            .arg("-p")
+        let mut cmd = Command::new(&self.claude_bin);
+        cmd.arg("-p")
             .arg(&self.prompt)
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
-            .arg("--verbose")
+            .arg("--verbose");
+
+        if let Some(model) = &self.model {
+            cmd.arg("--model").arg(model);
+        }
+
+        let output = cmd
             .current_dir(&self.working_dir)
             .output()
             .await?;

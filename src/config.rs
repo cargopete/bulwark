@@ -20,6 +20,11 @@ pub struct Config {
 
     #[serde(default)]
     pub schemas: SchemasConfig,
+
+    /// Claude model for AI passes. Defaults to "haiku" (cheapest).
+    /// Options: "haiku", "sonnet", "opus"
+    #[serde(default = "default_model")]
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +314,9 @@ fn default_prompts_dir() -> String {
 }
 fn default_schemas_dir() -> String {
     "schemas".into()
+}
+fn default_model() -> String {
+    "haiku".into()
 }
 
 impl Config {

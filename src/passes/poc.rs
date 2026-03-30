@@ -206,6 +206,7 @@ async fn generate_and_validate_poc(
             max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.to_path_buf(),
+            model: Some(ctx.config.model.clone()),
         };
 
         let _ = session.run().await;
