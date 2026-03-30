@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure all tool paths are available
+export PATH="/home/auditor/.claude/bin:/home/auditor/.foundry/bin:${PATH}"
+
 AUDIT_DIR="/home/auditor/audits/graph-contracts"
 AUDIT_TARGET="${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}"
 AUDIT_BRANCH="${AUDIT_BRANCH:-main}"
