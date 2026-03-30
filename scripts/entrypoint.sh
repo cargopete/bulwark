@@ -104,17 +104,32 @@ if [ -d "packages/subgraph-service" ]; then
     (cd packages/subgraph-service && forge build 2>/dev/null) && echo "  ✓ SubgraphService compiled" || echo "  ✗ SubgraphService build failed (may need manual setup)"
 fi
 
-# ── Print status ─────────────────────────────────────────────────────
+# ── Restore Claude Code settings (something overwrites ours during setup) ─
+cp /home/auditor/.doyran-settings.json /home/auditor/.claude/settings.json 2>/dev/null || true
+
+# ── Print status (only in interactive mode) ──────────────────────────
+cd "$AUDIT_DIR"
+
+# If running an explicit command (not bash), skip the banner and just exec it
+if [ $# -gt 0 ] && [ "$1" != "bash" ] && [ "$1" != "sh" ]; then
+    exec "$@"
+fi
+
 echo ""
 echo "════════════════════════════════════════════════════════════"
 echo "  Ready. Working directory: $AUDIT_DIR"
 echo ""
 echo "  Available commands:"
-echo "    /home/auditor/pipeline/doyran-pipeline.sh          — Run full pipeline"
-echo "    /home/auditor/pipeline/doyran-pipeline.sh --pass 1 — Recon only (no AI)"
-echo "    /home/auditor/scripts/run-slither.sh               — Slither static analysis"
-echo "    /home/auditor/scripts/run-audit.sh                 — v1 single-pass audit"
-echo "    claude                                             — Claude Code (interactive)"
+echo "    doyran run                   — Run full 6-pass pipeline"
+echo "    doyran run --pass 1          — Recon only (no AI)"
+echo "    doyran run --pass 2-3        — Agents + PoC Gate"
+echo "    doyran run --pass 2 --agent red  — Single agent run"
+echo "    doyran status                — Pipeline status"
+echo "    doyran findings              — List findings"
+echo "    doyran report                — Regenerate report"
+echo "    doyran doctor                — Check tool availability"
+echo "    doyran login                 — Authenticate Claude"
+echo "    claude                       — Claude Code (interactive)"
 echo ""
 echo "  Installed tools:"
 command -v slither >/dev/null && echo "    ✓ Slither $(slither --version 2>&1 | head -1)" || echo "    ✗ Slither"
@@ -124,5 +139,4 @@ command -v claude >/dev/null && echo "    ✓ Claude Code" || echo "    ✗ Clau
 echo "════════════════════════════════════════════════════════════"
 echo ""
 
-cd "$AUDIT_DIR"
 exec "$@"

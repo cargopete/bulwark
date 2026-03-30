@@ -9,11 +9,14 @@ services:
       - AUDIT_TARGET=${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}
       - AUDIT_BRANCH=${AUDIT_BRANCH:-main}
       - AUDIT_SCOPE=${AUDIT_SCOPE:-packages/horizon packages/subgraph-service}
+      - DOYRAN_ROOT=/home/auditor
     volumes:
       # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
       # Persist Claude auth and conversation history
       - claude-history:/home/auditor/.claude
+      # Mount config for easy editing without rebuild
+      - ./doyran.toml:/home/auditor/doyran.toml:ro
       # Optional: mount host Claude auth for licensed users (uncomment below)
       # - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
     stdin_open: true

@@ -1,3 +1,18 @@
+# ══════════════════════════════════════════════════════════════════════
+# Stage 1: Build the Rust CLI
+# ══════════════════════════════════════════════════════════════════════
+FROM rust:1.85-bookworm AS builder
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+COPY src/ src/
+
+# Build release binary
+RUN cargo build --release && strip target/release/doyran
+
+# ══════════════════════════════════════════════════════════════════════
+# Stage 2: Runtime image with all audit tooling
+# ══════════════════════════════════════════════════════════════════════
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -66,6 +81,9 @@ ENV PATH="/home/auditor/.foundry/bin:${PATH}"
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/auditor/.local/bin:${PATH}"
 
+# ── Copy Doyran CLI binary from builder ──────────────────────────────
+COPY --from=builder --chown=auditor:auditor /build/target/release/doyran /usr/local/bin/doyran
+
 # ── Directory structure ──────────────────────────────────────────────
 RUN mkdir -p \
     /home/auditor/.claude \
@@ -77,17 +95,22 @@ RUN mkdir -p \
     /home/auditor/prompts \
     /home/auditor/schemas
 
-# ── Copy config and scripts ──────────────────────────────────────────
+# ── Copy config, scripts, and pipeline assets ────────────────────────
 COPY --chown=auditor:auditor config/settings.json /home/auditor/.claude/settings.json
+COPY --chown=auditor:auditor config/settings.json /home/auditor/.doyran-settings.json
 COPY --chown=auditor:auditor config/CLAUDE.md /home/auditor/.claude/CLAUDE.md
 COPY --chown=auditor:auditor context/ /home/auditor/context/
 COPY --chown=auditor:auditor scripts/ /home/auditor/scripts/
 COPY --chown=auditor:auditor pipeline/ /home/auditor/pipeline/
 COPY --chown=auditor:auditor prompts/ /home/auditor/prompts/
 COPY --chown=auditor:auditor schemas/ /home/auditor/schemas/
+COPY --chown=auditor:auditor doyran.toml /home/auditor/doyran.toml
 RUN chmod +x /home/auditor/scripts/*.sh \
     && chmod +x /home/auditor/pipeline/*.sh \
     && chmod +x /home/auditor/pipeline/lib/*.sh
+
+ENV DOYRAN_ROOT="/home/auditor"
+ENV DOYRAN_CONTAINER="1"
 
 ENTRYPOINT ["/home/auditor/scripts/entrypoint.sh"]
 CMD ["bash"]
