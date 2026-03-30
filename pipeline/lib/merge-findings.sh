@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ════════════════════════════════════════════════════════════════════════
+# DOYRAN v2 — Finding Merge & Deduplication Utility
+# ════════════════════════════════════════════════════════════════════════
+# Merges findings from multiple agents, deduplicates by dedup_hash,
+# and resolves severity conflicts.
+#
+# Usage: merge-findings.sh <output.json> <input1.json> [input2.json] ...
+# ════════════════════════════════════════════════════════════════════════
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+if [ $# -lt 2 ]; then
+    echo "Usage: merge-findings.sh <output.json> <input1.json> [input2.json] ..."
+    exit 1
+fi
+
+OUTPUT="$1"
+shift
+
+log_info "Merging findings from $# sources..."
+
+# Severity ranking for conflict resolution (higher = more severe)
+# When same finding found by multiple agents, keep the highest severity
+SEVERITY_RANK='{"Critical":5,"High":4,"Medium":3,"Low":2,"Informational":1}'
+
+# Step 1: Concatenate all findings and compute dedup_hash where missing
+MERGED=$(mktemp)
+echo '[]' > "$MERGED"
+
+TOTAL_INPUT=0
+for input_file in "$@"; do
+    if [ -f "$input_file" ] && [ "$(jq length "$input_file" 2>/dev/null)" -gt 0 ]; then
+        count=$(jq length "$input_file")
+        TOTAL_INPUT=$((TOTAL_INPUT + count))
+        log_info "  $(basename "$input_file"): $count findings"
+
+        # Add dedup_hash if missing, then append
+        jq --slurpfile existing "$MERGED" '
+            [.[] | . + (
+                if .dedup_hash == null or .dedup_hash == "" then
+                    {dedup_hash: ((.contract // "") + "|" + (.function // "") + "|" + (.property_violated // "") + "|" + (.title // "") | @base64)}
+                else
+                    {}
+                end
+            )] + $existing[0]
+        ' "$input_file" > "${MERGED}.tmp" && mv "${MERGED}.tmp" "$MERGED"
+    fi
+done
+
+log_info "Total input findings: $TOTAL_INPUT"
+
+# Step 2: Deduplicate by dedup_hash, keeping highest severity
+jq --argjson rank "$SEVERITY_RANK" '
+    group_by(.dedup_hash) | map(
+        sort_by(-($rank[.severity] // 0)) | first
+        | . + {
+            found_by: [group_by(.dedup_hash)[0][]?.source] | unique,
+            severity_disagreements: (
+                [group_by(.dedup_hash)[0][]?.severity] | unique |
+                if length > 1 then . else null end
+            )
+        }
+    )
+    | sort_by(-($rank[.severity] // 0))
+    | to_entries | map(.value + {id: ("F-" + ((.key + 1) | tostring | if length < 3 then "0" * (3 - length) + . else . end))})
+' "$MERGED" > "$OUTPUT" 2>/dev/null || {
+    # Fallback: simpler dedup if complex jq fails
+    log_warn "Complex dedup failed, using simple dedup"
+    jq 'unique_by(.dedup_hash) | sort_by(.severity)' "$MERGED" > "$OUTPUT"
+}
+
+DEDUPED_COUNT=$(jq length "$OUTPUT" 2>/dev/null || echo "0")
+DISAGREEMENTS=$(jq '[.[] | select(.severity_disagreements != null)] | length' "$OUTPUT" 2>/dev/null || echo "0")
+
+log_ok "After deduplication: $DEDUPED_COUNT findings ($((TOTAL_INPUT - DEDUPED_COUNT)) duplicates removed)"
+if [ "$DISAGREEMENTS" -gt 0 ]; then
+    log_warn "Severity disagreements: $DISAGREEMENTS findings — flagged for Pass 6 review"
+fi
+
+rm -f "$MERGED"

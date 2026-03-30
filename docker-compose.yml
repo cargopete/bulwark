@@ -3,14 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: graph-audit-toolkit
+    container_name: doyran-v2
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUDIT_TARGET=${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}
       - AUDIT_BRANCH=${AUDIT_BRANCH:-main}
       - AUDIT_SCOPE=${AUDIT_SCOPE:-packages/horizon packages/subgraph-service}
     volumes:
-      # Persist audit outputs between runs
+      # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
       # Persist Claude auth and conversation history
       - claude-history:/home/auditor/.claude
@@ -18,12 +18,12 @@ services:
       # - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
     stdin_open: true
     tty: true
-    # Limit resources to prevent runaway processes
+    # v2 resource requirements (up from 8G/4CPU in v1)
     deploy:
       resources:
         limits:
-          memory: 8G
-          cpus: "4"
+          memory: 16G
+          cpus: "8"
 
 volumes:
   audit-outputs:

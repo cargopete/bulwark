@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Doyran Recon Report",
+  "description": "Schema for Pass 1 (Reconnaissance) output",
+  "type": "object",
+  "required": ["generated", "pass", "contracts_compiled", "entry_points", "slither_summary"],
+  "properties": {
+    "generated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pass": {
+      "const": "recon"
+    },
+    "duration_seconds": {
+      "type": "number"
+    },
+    "contracts_compiled": {
+      "type": "boolean"
+    },
+    "compiler_version": {
+      "type": "string"
+    },
+    "entry_points": {
+      "type": "object",
+      "description": "Per-contract entry point data",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string" },
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "visibility": { "type": "string", "enum": ["external", "public"] },
+                "mutability": { "type": "string" },
+                "modifiers": { "type": "array", "items": { "type": "string" } },
+                "line": { "type": "integer" }
+              },
+              "required": ["name", "visibility"]
+            }
+          }
+        }
+      }
+    },
+    "slither_summary": {
+      "type": "object",
+      "properties": {
+        "high": { "type": "integer" },
+        "medium": { "type": "integer" },
+        "low": { "type": "integer" },
+        "informational": { "type": "integer" },
+        "optimization": { "type": "integer" }
+      }
+    },
+    "storage_layouts": {
+      "type": "object",
+      "description": "Per-contract storage layout from forge inspect",
+      "additionalProperties": { "type": "object" }
+    },
+    "math_operations": {
+      "type": "object",
+      "description": "Inventory of arithmetic operations in sensitive contracts",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer" },
+            "operation": { "type": "string" },
+            "context": { "type": "string" }
+          }
+        }
+      }
+    },
+    "access_control": {
+      "type": "object",
+      "description": "Role and modifier mapping",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "proxy_mappings": {
+      "type": "array",
+      "description": "Proxy-to-implementation contract relationships",
+      "items": {
+        "type": "object",
+        "properties": {
+          "proxy": { "type": "string" },
+          "implementation": { "type": "string" },
+          "source": { "type": "string" }
+        }
+      }
+    }
+  }
+}

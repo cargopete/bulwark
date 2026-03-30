@@ -9,8 +9,8 @@ AUDIT_TARGET="${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}"
 AUDIT_BRANCH="${AUDIT_BRANCH:-main}"
 
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║  Graph Protocol AI Audit Toolkit                        ║"
-echo "║  Trail of Bits Skills + forefy/.context + Slither        ║"
+echo "║  Doyran v2 — Graph Protocol Audit Pipeline              ║"
+echo "║  Multi-pass · Multi-agent · PoC-gated                   ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -52,6 +52,7 @@ echo "→ Setting up audit context files..."
 cp /home/auditor/context/AUDIT_CONTEXT.md "$AUDIT_DIR/AUDIT_CONTEXT.md"
 cp /home/auditor/context/PROPERTIES.md "$AUDIT_DIR/PROPERTIES.md"
 cp /home/auditor/context/KNOWN_ISSUES.md "$AUDIT_DIR/KNOWN_ISSUES.md"
+cp /home/auditor/context/ATTACK_PATTERNS.md "$AUDIT_DIR/ATTACK_PATTERNS.md"
 
 # Create project-level CLAUDE.md that references the context files
 if [ ! -f "$AUDIT_DIR/CLAUDE.md" ]; then
@@ -109,9 +110,11 @@ echo "════════════════════════�
 echo "  Ready. Working directory: $AUDIT_DIR"
 echo ""
 echo "  Available commands:"
-echo "    ./scripts/run-slither.sh   — Run Slither static analysis"
-echo "    ./scripts/run-audit.sh     — Run full AI audit workflow"
-echo "    claude                     — Start Claude Code (interactive)"
+echo "    /home/auditor/pipeline/doyran-pipeline.sh          — Run full v2 pipeline"
+echo "    /home/auditor/pipeline/doyran-pipeline.sh --pass 1 — Recon only (no AI)"
+echo "    /home/auditor/scripts/run-slither.sh               — Slither static analysis"
+echo "    /home/auditor/scripts/run-audit.sh                 — v1 single-pass audit"
+echo "    claude                                             — Claude Code (interactive)"
 echo ""
 echo "  Installed tools:"
 command -v slither >/dev/null && echo "    ✓ Slither $(slither --version 2>&1 | head -1)" || echo "    ✗ Slither"

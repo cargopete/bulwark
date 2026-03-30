@@ -1,232 +1,168 @@
-# Doyran — AI Smart Contract Audit Toolkit
+# Doyran v2
 
-A Docker-based, reproducible smart contract audit environment combining open source
-static analysis tools with AI-augmented security review via Claude Code.
+Multi-pass, multi-agent smart contract audit pipeline for The Graph Protocol.
+One Docker command to get a six-pass security analysis with adversarial AI agents,
+PoC-gated findings, fuzzing, and formal verification.
 
-## What's Inside
+## Pipeline Overview
 
-| Layer | Tools | Purpose |
-|-------|-------|---------|
-| Static analysis | Slither | Known vulnerability pattern detection |
-| Compilation & testing | Foundry (Forge), solc | Build, test, inspect storage layouts |
-| AI infrastructure | Trail of Bits Skills (36 plugins) | Entry point mapping, FP verification, variant analysis |
-| AI intelligence | forefy/.context (6 skills) | Multi-expert audit, protocol-type matching (10,600+ findings) |
-| Orchestration | Claude Code | Ties everything together with structured audit prompts |
-
-## Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- One of the following for AI features:
-  - An Anthropic API key (`ANTHROPIC_API_KEY`), **or**
-  - A Claude Code license (Max, Team, or Enterprise plan)
-
-## Step-by-Step Setup
-
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/cargopete/doyran.git
-cd doyran
+```
+Pass 1: Reconnaissance ──────────── Deterministic (Slither, Forge, grep)
+  │
+Pass 2: Multi-Agent Analysis ────── 3x parallel Claude sessions (RED/BLUE/GOLD)
+  │
+Pass 3: PoC Generation ─────────── "No PoC, no finding" — validates with Forge
+  │
+Pass 4: Fuzzing Campaign ───────── Foundry invariant tests + Medusa + Echidna
+  │                                  (runs in parallel with Pass 5)
+Pass 5: Formal Verification ────── Halmos bounded model checking
+  │
+Pass 6: Adversarial Review ─────── Fresh Claude session challenges everything
+  │
+  └──► final-report.md
 ```
 
-### 2. (Optional) Set your API key
+## Quick Start
 
-Only needed if you're using API key auth. Skip this if you have a Claude Code license.
+### 1. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY=sk-ant-your-key-here
+# Set ANTHROPIC_API_KEY in .env (or use claude login inside container)
 ```
 
-### 3. Build the Docker image
-
-This takes ~3-5 minutes on first build. It installs Slither, Foundry, Claude Code,
-and all the AI audit skills.
+### 2. Build and enter
 
 ```bash
 docker compose build
-```
-
-### 4. Start the audit environment
-
-```bash
 docker compose run --rm -it audit-env bash
 ```
 
-On first run, the entrypoint will:
-- Clone `graphprotocol/contracts` (~30 seconds)
-- Install contract dependencies via pnpm (~30 seconds)
-- Clone and install Trail of Bits Skills + forefy/.context (~10 seconds)
-- Compile the Horizon contracts with Forge (~20 seconds)
-- Print a status summary
-
-You should see something like:
-
-```
-  Installed tools:
-    ✓ Slither 0.11.5
-    ✓ Foundry forge Version: 1.5.1-stable
-    ✓ Claude Code
-```
-
-### 5. Authenticate Claude Code
-
-You're now inside the container at a bash prompt.
-
-**Option A: API key** — if you set `ANTHROPIC_API_KEY` in step 2, you're already
-authenticated. Skip to step 6.
-
-**Option B: Claude Code license** — run this at the bash prompt:
+### 3. Authenticate Claude Code
 
 ```bash
+# API key (already set if .env configured):
+echo $ANTHROPIC_API_KEY
+
+# Or license login:
 claude login
 ```
 
-Follow the prompts to authenticate via your browser. This only needs to be done
-once per container session.
-
-### 6. Start auditing
-
-You have three options:
-
-**Interactive Claude Code session** (recommended for first use):
+### 4. Run the pipeline
 
 ```bash
+# Full pipeline (all 6 passes)
+/home/auditor/pipeline/doyran-pipeline.sh
+
+# Recon only (no AI, no auth needed)
+/home/auditor/pipeline/doyran-pipeline.sh --pass 1
+
+# Passes 1-3 (recon + agents + PoC gate)
+/home/auditor/pipeline/doyran-pipeline.sh --pass 1-3
+
+# Resume from a specific pass
+/home/auditor/pipeline/doyran-pipeline.sh --resume 3
+```
+
+### 5. Or use interactively
+
+```bash
+# Standalone Slither analysis
+/home/auditor/scripts/run-slither.sh
+
+# Interactive Claude Code session
 claude
 ```
 
-You'll land in an interactive session with all audit context pre-loaded.
-Try a prompt like:
+## Agent Personas (Pass 2)
+
+| Agent | Focus | Instruction |
+|-------|-------|-------------|
+| RED | Attacker | Find exploits that steal funds. Paid per critical finding. |
+| BLUE | Systematic | Verify every property P-1 through P-22. Skipping is failure. |
+| GOLD | Economic | Rounding errors, incentive misalignment, MEV, flash loans. |
+
+Agents cannot see each other's output. Findings are merged and deduplicated
+after all three complete.
+
+## Validation Gate (Pass 3)
+
+| PoC Status | Outcome |
+|------------|---------|
+| Compiles and demonstrates | Finding survives, severity preserved |
+| Compiles but inconclusive | Finding survives, severity capped at Medium |
+| Failed to compile | **Finding DISCARDED** |
+| Infeasible conditions | **Finding DISCARDED** |
+| Requires mainnet simulation | Flagged for manual review |
+
+## Output Structure
 
 ```
-Read AUDIT_CONTEXT.md, PROPERTIES.md and KNOWN_ISSUES.md, then audit
-HorizonStaking for rounding errors in delegation pool math
+audit-workspace/
+├── recon/                    # Pass 1: structural data
+│   ├── entry-points.json
+│   ├── storage-layouts.json
+│   ├── slither-results.json
+│   ├── dependency-graph.json
+│   ├── math-operations.json
+│   ├── access-control.json
+│   └── proxy-mappings.json
+├── findings/                 # Pass 2: agent outputs
+│   ├── red-agent-raw.json
+│   ├── blue-agent-raw.json
+│   ├── gold-agent-raw.json
+│   └── merged-deduplicated.json
+├── pocs/                     # Pass 3: validated PoCs
+│   ├── F-001.t.sol
+│   └── validated-findings.json
+├── fuzzing/                  # Pass 4
+├── formal/                   # Pass 5
+├── review/                   # Pass 6
+├── final-report.md           # Human-readable output
+└── final-report.json         # Machine-readable output
 ```
 
-**Slither static analysis** (no Claude auth needed):
+## Context Files
 
-```bash
-/home/auditor/scripts/run-slither.sh
-```
+Pre-populated for The Graph Protocol:
 
-Runs Slither on all in-scope contracts and saves JSON + SARIF reports.
-
-**Full automated workflow** (static analysis → AI deep audit):
-
-```bash
-/home/auditor/scripts/run-audit.sh
-```
-
-Runs Slither first, then launches Claude Code with a structured audit prompt
-covering all critical areas.
-
-## Example Audit Prompts
-
-Once inside Claude Code, here are some useful starting points:
-
-```
-# Full scope audit
-Audit all in-scope Horizon contracts against the 22 properties in PROPERTIES.md
-
-# Focused analysis
-Analyse the slashing logic in HorizonStaking.slash() — verify P-10 (provider-first
-ordering) holds under all edge cases including concurrent slashes
-
-# Entry point mapping
-Map all external/public state-changing functions in packages/horizon/contracts/,
-categorised by access level
-
-# Rounding review (the $290K bounty area)
-Review all division operations in delegation pool math. For each, determine
-rounding direction and whether an attacker can exploit accumulated rounding
-
-# Payment escrow race conditions
-Analyse the thaw-then-collect interaction in PaymentsEscrow — can a payer
-front-run collection by starting a thaw?
-```
-
-## Targeting a Different Repo
-
-Override the default target to audit any Solidity codebase:
-
-```bash
-# Different repo
-AUDIT_TARGET=https://github.com/example/contracts.git docker compose run --rm -it audit-env bash
-
-# Different branch
-AUDIT_BRANCH=feature/v2-upgrade docker compose run --rm -it audit-env bash
-```
-
-Note: the Graph-specific context files (AUDIT_CONTEXT.md, PROPERTIES.md,
-KNOWN_ISSUES.md) will still be copied. Replace them with your own protocol's
-context for best results.
+- **AUDIT_CONTEXT.md** — Protocol overview, trust model, in-scope contracts
+- **PROPERTIES.md** — 22 security invariants (P-1 through P-22)
+- **KNOWN_ISSUES.md** — 4 accepted risks, 5 fixed issues, 3 focus areas
+- **ATTACK_PATTERNS.md** — 10 known patterns from previous audits and bounties
 
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | For AI features* | — | Anthropic API key (*or use `claude login`) |
-| `AUDIT_TARGET` | No | `graphprotocol/contracts` | Git repo URL to audit |
-| `AUDIT_BRANCH` | No | `main` | Branch to check out |
-| `AUDIT_SCOPE` | No | `packages/horizon packages/subgraph-service` | Packages to focus on |
+| `ANTHROPIC_API_KEY` | For AI passes | — | Or use `claude login` |
+| `AUDIT_TARGET` | No | graphprotocol/contracts | Git repo URL |
+| `AUDIT_BRANCH` | No | `main` | Branch to audit |
 
-## Directory Layout (inside container)
+## Estimated Cost Per Run
 
-```
-/home/auditor/
-├── audits/
-│   └── graph-contracts/          ← cloned target repo + context files
-│       ├── AUDIT_CONTEXT.md      ← protocol overview, trust model
-│       ├── PROPERTIES.md         ← 22 security invariants to verify
-│       ├── KNOWN_ISSUES.md       ← accepted risks + focus areas
-│       └── CLAUDE.md             ← audit instructions for Claude
-├── tools/
-│   ├── claude-code-config/       ← Trail of Bits config
-│   ├── tob-skills/               ← Trail of Bits skills (36 plugins)
-│   ├── tob-skills-curated/       ← scv-scan and curated skills (28 plugins)
-│   └── forefy-context/           ← forefy/.context audit skills
-├── scripts/
-│   ├── run-slither.sh            ← standalone static analysis
-│   ├── run-audit.sh              ← full audit workflow
-│   └── install-skills.sh         ← skill installation (runs at startup)
-└── .claude/
-    ├── settings.json             ← Claude Code permissions and guardrails
-    ├── CLAUDE.md                 ← global audit instructions
-    ├── commands/                 ← Trail of Bits slash commands
-    └── skills/                   ← forefy audit skills
-```
+| Pass | Cost |
+|------|------|
+| Pass 1 (Recon) | $0 |
+| Pass 2 (3 agents) | ~$45 |
+| Pass 3 (PoC generation) | ~$10-25 |
+| Pass 4 (Fuzzing) | $0 |
+| Pass 5 (Formal verification) | $0 |
+| Pass 6 (Adversarial review) | ~$20 |
+| **Total** | **$60-100** |
 
-## Realistic Expectations
+## Build Status
 
-| Metric | Range |
-|--------|-------|
-| False positive rate (after FP verification) | 25–40% |
-| Critical/High recall vs human auditor | 40–50% |
-| Unique findings not in human audit | 1–3 per engagement |
-| Token cost per audit | $15–$50 |
+| Phase | Status |
+|-------|--------|
+| Phase 1: Pipeline skeleton + Pass 1 | Done |
+| Phase 2: Agent prompts (RED/BLUE/GOLD) | Stub |
+| Phase 3: PoC pipeline | Stub |
+| Phase 4: Fuzzing integration (Chimera) | Stub |
+| Phase 5: Formal verification (Halmos) | Stub |
+| Phase 6: Review + reporting | Stub |
+| Phase 7: Calibration | Pending |
 
-This is a **force multiplier**, not a replacement for human auditors. It catches
-the 1–3 findings that both audit firms missed because they reviewed different
-parts of the codebase in isolation.
+## License
 
-## Known Limitations
-
-1. **SubgraphService** — currently requires solc 0.8.33 (unreleased). Horizon
-   contracts compile and analyse fine.
-
-2. **Mythril** — optional dependency, fails to install on some platforms due to
-   numpy/Python 3.12 incompatibility. Slither covers the primary use case.
-
-3. **Trail of Bits Skills and forefy/.context** — installed at startup via git
-   clone. If the repos change structure or are unavailable, the toolkit degrades
-   gracefully to static analysis + vanilla Claude Code.
-
-4. **Non-determinism** — running the same audit twice produces different results.
-   For high-stakes reviews, run the AI analysis 2–3 times and union the findings.
-
-5. **AI blind spots** — consistently misses: novel economic attacks, complex
-   multi-tx exploit chains, governance manipulation, MEV-specific attacks, and
-   subtle timing assumptions. These require human auditors.
-
-6. **Requires human triage** — every AI finding should be verified before
-   escalation. See the 6-gate triage checklist in the full research report.
+Private — The Graph Protocol internal tooling.

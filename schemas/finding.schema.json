@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Doyran Finding",
+  "description": "Schema for a single audit finding across all pipeline passes",
+  "type": "object",
+  "required": ["id", "source", "severity", "confidence", "title", "contract", "function", "attack_scenario"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^F-[0-9]{3,}$",
+      "description": "Finding identifier (F-001, F-002, etc.)"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["red-agent", "blue-agent", "gold-agent", "fuzzer", "halmos", "adversarial-review", "slither"],
+      "description": "Which pipeline pass or agent produced this finding"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["Critical", "High", "Medium", "Low", "Informational"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["High", "Medium", "Low"]
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "contract": {
+      "type": "string",
+      "description": "Source file (e.g. HorizonStaking.sol)"
+    },
+    "function": {
+      "type": "string",
+      "description": "Affected function name"
+    },
+    "lines": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "Line numbers in the source file"
+    },
+    "property_violated": {
+      "type": ["string", "null"],
+      "pattern": "^P-[0-9]{1,2}$",
+      "description": "Reference to PROPERTIES.md (P-1 through P-22)"
+    },
+    "attack_scenario": {
+      "type": "string",
+      "description": "3-sentence attack description: who, what, gain"
+    },
+    "poc_file": {
+      "type": ["string", "null"],
+      "description": "Path to Foundry PoC test file relative to audit-workspace/"
+    },
+    "poc_status": {
+      "type": "string",
+      "enum": [
+        "compiles_and_demonstrates",
+        "compiles_but_inconclusive",
+        "failed_to_compile",
+        "infeasible_conditions",
+        "requires_mainnet_simulation",
+        "not_attempted"
+      ],
+      "default": "not_attempted"
+    },
+    "dedup_hash": {
+      "type": "string",
+      "description": "SHA-256 of (contract + function + property_violated + attack_type) for deduplication"
+    }
+  }
+}

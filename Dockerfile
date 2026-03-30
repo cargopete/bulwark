@@ -72,14 +72,22 @@ RUN mkdir -p \
     /home/auditor/.claude/commands \
     /home/auditor/tools \
     /home/auditor/audits \
-    /home/auditor/context
+    /home/auditor/context \
+    /home/auditor/pipeline/lib \
+    /home/auditor/prompts \
+    /home/auditor/schemas
 
 # ── Copy config and scripts ──────────────────────────────────────────
 COPY --chown=auditor:auditor config/settings.json /home/auditor/.claude/settings.json
 COPY --chown=auditor:auditor config/CLAUDE.md /home/auditor/.claude/CLAUDE.md
 COPY --chown=auditor:auditor context/ /home/auditor/context/
 COPY --chown=auditor:auditor scripts/ /home/auditor/scripts/
-RUN chmod +x /home/auditor/scripts/*.sh
+COPY --chown=auditor:auditor pipeline/ /home/auditor/pipeline/
+COPY --chown=auditor:auditor prompts/ /home/auditor/prompts/
+COPY --chown=auditor:auditor schemas/ /home/auditor/schemas/
+RUN chmod +x /home/auditor/scripts/*.sh \
+    && chmod +x /home/auditor/pipeline/*.sh \
+    && chmod +x /home/auditor/pipeline/lib/*.sh
 
 ENTRYPOINT ["/home/auditor/scripts/entrypoint.sh"]
 CMD ["bash"]
