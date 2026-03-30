@@ -8,12 +8,12 @@ Status of doyran vs the target architecture from the AI-augmented audit toolkit 
 
 | Component | Status | Detail |
 |---|---|---|
-| **Pass 1: Recon** | **Working** | 9 sub-steps in Rust: forge build, Slither, entry points, storage layouts, dependency graph, access control, math ops, proxies, summary |
-| **Pass 2: Agents** | **Plumbing works** | Launches RED/BLUE/GOLD Claude sessions in parallel. Prompts are well-crafted with Graph-specific scope, severity calibration, and structured JSON output. Merge/dedup logic is real. **Untested with actual findings** (Write permission was missing, now fixed) |
-| **Pass 3: PoC Gate** | **Code exists** | Claude generates Foundry PoCs per finding, runs forge build + test, discards failures. Never executed (Pass 2 returned 0 findings) |
-| **Pass 4: Fuzzing** | **Code exists** | Claude generates invariant tests, Forge runs them. Medusa/Echidna integration coded but tools not installed |
-| **Pass 5: Formal** | **Code exists** | Claude generates symbolic tests. Halmos runner coded but tool not installed |
-| **Pass 6: Review** | **Code exists** | Adversarial review session + markdown/JSON report generation. Never executed |
+| **Pass 1: Recon** | **Tested ✓** | 9 sub-steps in Rust: forge build, Slither, entry points, storage layouts, dependency graph, access control, math ops, proxies, summary. Produces real structured JSON (Slither H:28 M:75 L:48). |
+| **Pass 2: Agents** | **Tested ✓** | RED/BLUE/GOLD run in parallel, produced 40 raw findings → 12 unique after merge/dedup. Report generated: C:1 H:2 M:5 L:4. |
+| **Pass 3: PoC Gate** | **Tested, PoCs fail** | Runs and processes all 12 findings, but generated PoCs fail to compile against Graph's complex dependency tree. Needs test harness template or smarter model. |
+| **Pass 4: Fuzzing** | **Untested — hung** | Claude generates invariant tests, Forge runs them. Medusa/Echidna integration coded but tools not installed. Attempted but hung before launching Claude — needs debugging. |
+| **Pass 5: Formal** | **Untested** | Claude generates symbolic tests. Halmos runner coded but tool not installed |
+| **Pass 6: Review** | **Untested** | Adversarial review session + markdown/JSON report generation. No missing deps — just needs testing. |
 | **Docker container** | **Working** | Ubuntu 24.04, Forge, Slither, Claude Code, Node 22. Builds and runs |
 | **CLI** | **Working** | run, status, findings, validate, report, doctor, login. All subcommands implemented |
 | **Config** | **Working** | doyran.toml with per-pass settings, tool paths, target scope |
@@ -61,12 +61,16 @@ The pipeline installs 70 third-party skills into Claude's commands directory. Th
 - [x] Fix Write permission in settings.json
 - [x] Fix let-chain compilation for Docker (Rust 1.85)
 - [x] Fix config path resolution in container
-- [ ] Run Pass 2 with Write enabled, verify agents produce findings
-- [ ] Run Pass 3, verify PoC generation and validation gate works
+- [x] Fix settings.json runtime overwrite (backup/restore pattern)
+- [x] Run Pass 2 with Write enabled — 40 raw findings, 12 unique after merge ✓
+- [x] Run Pass 3 — runs but PoCs fail to compile (Graph dependency tree too complex for Haiku)
+- [x] Default model to haiku, configurable via doyran.toml
+- [ ] Debug Pass 4 hang (Claude session not launching)
+- [ ] Test Pass 6 (adversarial review — no missing deps)
+- [ ] Improve Pass 3: add test harness template or use sonnet for PoC generation
 - [ ] Check agent logs — are they reading recon output? Using installed skills?
-- [ ] Tune prompts if agents are underperforming
 
-**Success criteria**: At least 5 findings from Pass 2, at least 1 survives Pass 3 PoC gate.
+**Success criteria**: ~~At least 5 findings from Pass 2~~ ✓ (12 findings). At least 1 survives Pass 3 PoC gate (not yet achieved).
 
 ## Phase 1: Wire skills into the pipeline
 

@@ -3,9 +3,10 @@
 Multi-pass, multi-agent smart contract audit pipeline for The Graph Protocol.
 Rust CLI + Docker container with Slither, Forge, Claude Code, and 70 AI audit skills.
 
-> **Status**: Pass 1 (Recon) is working. Pass 2-3 (Agents + PoC Gate) have code
-> but are untested with real findings. Passes 4-6 have code but require tools
-> not yet installed (Halmos, Medusa, Echidna). See [ROADMAP.md](ROADMAP.md) for full status.
+> **Status**: Passes 1-2 tested and working (Recon + Agents produce real findings).
+> Pass 3 (PoC Gate) runs but PoCs struggle to compile against Graph's dependency tree.
+> Passes 4-6 have code but are untested — Pass 4/5 need missing tools (Halmos, Medusa, Echidna).
+> See [ROADMAP.md](ROADMAP.md) for full status.
 
 ## Quick Start
 
@@ -52,22 +53,22 @@ doyran doctor                # Check tool availability
 ## Pipeline
 
 ```
-Pass 1: Reconnaissance ──────── Deterministic (Slither, Forge, Rust)     [Working]
+Pass 1: Reconnaissance ──────── Deterministic (Slither, Forge, Rust)     [Tested ✓]
   |
-Pass 2: Multi-Agent Analysis ── 3x parallel Claude (RED/BLUE/GOLD)       [Code exists]
+Pass 2: Multi-Agent Analysis ── 3x parallel Claude (RED/BLUE/GOLD)       [Tested ✓]
   |
-Pass 3: PoC Generation ──────── "No PoC, no finding" gate (Forge)        [Code exists]
+Pass 3: PoC Generation ──────── "No PoC, no finding" gate (Forge)        [Runs, PoCs fail to compile]
   |
-Pass 4: Fuzzing Campaign ────── Foundry invariant tests + Medusa         [Code exists, tools missing]
+Pass 4: Fuzzing Campaign ────── Foundry invariant tests + Medusa         [Untested, tools missing]
   |                               (runs in parallel with Pass 5)
-Pass 5: Formal Verification ─── Halmos bounded model checking            [Code exists, tools missing]
+Pass 5: Formal Verification ─── Halmos bounded model checking            [Untested, tools missing]
   |
-Pass 6: Adversarial Review ──── Fresh Claude session challenges all       [Code exists]
+Pass 6: Adversarial Review ──── Fresh Claude session challenges all       [Untested]
   |
   +---> final-report.md
 ```
 
-### Pass 1: Reconnaissance (working)
+### Pass 1: Reconnaissance (tested, working)
 
 All Rust, no AI. Produces structured JSON consumed by all later passes:
 - Compiles contracts (`forge build`)
@@ -79,7 +80,7 @@ All Rust, no AI. Produces structured JSON consumed by all later passes:
 - Inventories arithmetic operations (division, multiplication)
 - Identifies proxy relationships
 
-### Pass 2: Multi-Agent Analysis (code exists, untested with findings)
+### Pass 2: Multi-Agent Analysis (tested, working — 40 raw → 12 unique findings)
 
 Three independent Claude Code sessions run in parallel. Agents cannot see
 each other's output. Each reads Pass 1 recon data + context files + source code.
@@ -93,7 +94,7 @@ each other's output. Each reads Pass 1 recon data + context files + source code.
 After completion, findings are merged and deduplicated with severity
 disagreement tracking.
 
-### Pass 3: PoC Gate (code exists, never executed)
+### Pass 3: PoC Gate (tested — runs but PoCs fail to compile)
 
 For each finding from Pass 2:
 1. Claude generates a Foundry test PoC
@@ -101,13 +102,17 @@ For each finding from Pass 2:
 3. `forge test` — must demonstrate the vulnerability
 4. Findings that fail are discarded
 
-### Passes 4-6 (code exists, tools not installed)
+Tested: runs and processes all findings, but generated PoCs fail to compile
+against Graph's complex dependency tree. Likely needs a test harness template
+or a smarter model (sonnet/opus) for this pass.
+
+### Passes 4-6 (untested)
 
 - **Pass 4**: Claude generates invariant tests from PROPERTIES.md, Forge runs them.
-  Medusa/Echidna for extended fuzzing (not installed).
+  Medusa/Echidna for extended fuzzing (not installed). Attempted but hung — needs debugging.
 - **Pass 5**: Claude generates symbolic tests, Halmos verifies (not installed).
 - **Pass 6**: Adversarial review Claude session challenges all findings.
-  Generates final markdown + JSON report.
+  Generates final markdown + JSON report. No missing dependencies — just needs testing.
 
 ## Installed AI Skills
 
