@@ -156,11 +156,11 @@ Pre-populated for The Graph Protocol:
 | Phase | Status |
 |-------|--------|
 | Phase 1: Pipeline skeleton + Pass 1 | Done |
-| Phase 2: Agent prompts (RED/BLUE/GOLD) | Stub |
-| Phase 3: PoC pipeline | Stub |
-| Phase 4: Fuzzing integration (Chimera) | Stub |
-| Phase 5: Formal verification (Halmos) | Stub |
-| Phase 6: Review + reporting | Stub |
+| Phase 2: Agent prompts (RED/BLUE/GOLD) | Done |
+| Phase 3: PoC pipeline | Done |
+| Phase 4: Fuzzing integration | Done |
+| Phase 5: Formal verification (Halmos) | Done |
+| Phase 6: Review + reporting | Done |
 | Phase 7: Calibration | Pending |
 
 ## License
