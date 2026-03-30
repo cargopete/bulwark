@@ -1,0 +1,28 @@
+services:
+  audit-env:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: graph-audit-toolkit
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AUDIT_TARGET=${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}
+      - AUDIT_BRANCH=${AUDIT_BRANCH:-main}
+      - AUDIT_SCOPE=${AUDIT_SCOPE:-packages/horizon packages/subgraph-service}
+    volumes:
+      # Persist audit outputs between runs
+      - audit-outputs:/home/auditor/audits
+      # Persist Claude conversation history
+      - claude-history:/home/auditor/.claude
+    stdin_open: true
+    tty: true
+    # Limit resources to prevent runaway processes
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4"
+
+volumes:
+  audit-outputs:
+  claude-history:

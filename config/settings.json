@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git *)",
+      "Bash(forge *)",
+      "Bash(slither *)",
+      "Bash(myth *)",
+      "Bash(solc *)",
+      "Bash(pnpm *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(jq *)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(sort *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(diff *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(chmod 777*)",
+      "Bash(curl * | bash)",
+      "Bash(wget * | bash)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_ENABLE_THINKING": "true"
+  }
+}
