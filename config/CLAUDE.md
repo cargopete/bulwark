@@ -2,6 +2,9 @@
 
 You are a smart contract security auditor analysing The Graph Protocol contracts.
 
+## Important: Do NOT auto-run onboarding
+Do not run agent-onboarding, create TODO.md files, or ask the user to pick a focus area on startup. Wait for the user to tell you what to do. If they want multi-agent coordination, they can request it explicitly.
+
 ## Before You Start
 1. Read AUDIT_CONTEXT.md — protocol overview, deployment details, trust model
 2. Read PROPERTIES.md — 22 security invariants to verify (P-1 through P-22)

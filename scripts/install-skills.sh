@@ -113,11 +113,18 @@ if [ -n "$FOREFY_DIR" ] && [ -d "$FOREFY_DIR" ]; then
     FOREFY_COUNT=0
     SKILLS_SRC="$FOREFY_DIR/skills"
     if [ -d "$SKILLS_SRC" ]; then
+        # Skills to skip auto-loading (opt-in only, too noisy on startup)
+        SKIP_SKILLS="agent-onboarding auditor-quiz"
+
         for skill_dir in "$SKILLS_SRC"/*/; do
             if [ -d "$skill_dir" ]; then
                 skill_name=$(basename "$skill_dir")
-                # Copy entire skill directory to Claude's commands area
-                # forefy skills have multi-file structures we want to preserve
+                # Skip skills that auto-trigger and disrupt first-time experience
+                if echo "$SKIP_SKILLS" | grep -qw "$skill_name"; then
+                    mkdir -p "$CLAUDE_DIR/skills-optional/$skill_name"
+                    cp -r "$skill_dir"* "$CLAUDE_DIR/skills-optional/$skill_name/" 2>/dev/null
+                    continue
+                fi
                 mkdir -p "$CLAUDE_DIR/skills/$skill_name"
                 cp -r "$skill_dir"* "$CLAUDE_DIR/skills/$skill_name/" 2>/dev/null
                 FOREFY_COUNT=$((FOREFY_COUNT + 1))
