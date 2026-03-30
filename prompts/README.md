@@ -31,6 +31,14 @@ Agents write their findings directly to `audit-workspace/findings/<agent>-raw.js
 
 - `poc-generator.md` — Foundry PoC writer. Receives one finding, writes a compilable test. Retries on build failure with error context.
 
+## Pass 4
+
+- `invariant-generator.md` — Generates Foundry invariant tests from PROPERTIES.md. Handler contracts expose fuzzable actions, invariant functions assert one property each.
+
+## Pass 5
+
+- `halmos-generator.md` — Generates Halmos symbolic tests for bounded model checking. Targets P-10, P-15, P-19, P-1, P-16. Uses `check_` prefix, `vm.assume()` for constraints.
+
 ## Pass 6 (TODO)
 
 - `adversarial-reviewer.md` — Final review, challenges all conclusions
