@@ -1,0 +1,67 @@
+[target]
+repo = "https://github.com/graphprotocol/contracts.git"
+branch = "main"
+scope = ["packages/horizon", "packages/subgraph-service"]
+core_contracts = [
+    "HorizonStaking",
+    "HorizonStakingExtension",
+    "GraphPayments",
+    "PaymentsEscrow",
+    "GraphTallyCollector",
+    "SubgraphService",
+    "DisputeManager",
+]
+math_sensitive = [
+    "HorizonStaking",
+    "HorizonStakingExtension",
+    "GraphPayments",
+    "PaymentsEscrow",
+]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+
+[passes.agents]
+enabled = true
+max_turns = 80
+agents = ["red", "blue", "gold"]
+timeout_minutes = 60
+
+[passes.poc]
+enabled = true
+max_turns = 30
+max_retries = 2
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+medusa_timeout = 3600
+echidna_limit = 500_000
+max_turns = 40
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+target_properties = ["P-1", "P-10", "P-15", "P-16", "P-19"]
+max_turns = 30
+
+[passes.review]
+enabled = true
+max_turns = 60
+
+# Override tool paths if not on PATH
+# [tools]
+# forge = "/home/auditor/.foundry/bin/forge"
+# slither = "/usr/local/bin/slither"
+# claude = "/home/auditor/.local/bin/claude"
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

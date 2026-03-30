@@ -1,0 +1,12 @@
+target/
+.git/
+.github/
+.env
+.env.*
+*.tmp
+audit-workspace/
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
