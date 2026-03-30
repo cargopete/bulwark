@@ -1,0 +1,43 @@
+[package]
+name = "doyran"
+version = "0.1.0"
+edition = "2024"
+description = "Multi-pass smart contract audit pipeline for The Graph Protocol"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# JSON Schema validation
+jsonschema = "0.28"
+
+# Terminal output
+indicatif = "0.17"
+console = "0.15"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+base64 = "0.22"
+sha2 = "0.10"
+which = "7"
+
+[dev-dependencies]
+tempfile = "3"
