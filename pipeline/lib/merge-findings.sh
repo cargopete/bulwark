@@ -8,8 +8,12 @@
 # Usage: merge-findings.sh <output.json> <input1.json> [input2.json] ...
 # ════════════════════════════════════════════════════════════════════════
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+MERGE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common.sh if not already loaded (check for log_info function)
+if ! declare -f log_info >/dev/null 2>&1; then
+    source "$MERGE_SCRIPT_DIR/common.sh"
+fi
 
 if [ $# -lt 2 ]; then
     echo "Usage: merge-findings.sh <output.json> <input1.json> [input2.json] ..."
@@ -53,22 +57,30 @@ log_info "Total input findings: $TOTAL_INPUT"
 
 # Step 2: Deduplicate by dedup_hash, keeping highest severity
 jq --argjson rank "$SEVERITY_RANK" '
-    group_by(.dedup_hash) | map(
-        sort_by(-($rank[.severity] // 0)) | first
-        | . + {
-            found_by: [group_by(.dedup_hash)[0][]?.source] | unique,
-            severity_disagreements: (
-                [group_by(.dedup_hash)[0][]?.severity] | unique |
-                if length > 1 then . else null end
-            )
+    group_by(.dedup_hash)
+    | [.[] | {
+        group: .,
+        sources: [.[].source] | unique,
+        severities: [.[].severity] | unique,
+        best: (sort_by(-($rank[.severity] // 0)) | first)
+      }
+      | .best + {
+          found_by: .sources,
+          severity_disagreements: (if (.severities | length) > 1 then .severities else null end)
         }
-    )
+    ]
     | sort_by(-($rank[.severity] // 0))
-    | to_entries | map(.value + {id: ("F-" + ((.key + 1) | tostring | if length < 3 then "0" * (3 - length) + . else . end))})
+    | to_entries
+    | map(.value + {
+        id: ("F-" + ((.key + 1) | tostring | if length < 3 then ("0" * (3 - length)) + . else . end))
+      })
 ' "$MERGED" > "$OUTPUT" 2>/dev/null || {
     # Fallback: simpler dedup if complex jq fails
     log_warn "Complex dedup failed, using simple dedup"
-    jq 'unique_by(.dedup_hash) | sort_by(.severity)' "$MERGED" > "$OUTPUT"
+    jq --argjson rank "$SEVERITY_RANK" '
+        unique_by(.dedup_hash)
+        | sort_by(-($rank[.severity] // 0))
+    ' "$MERGED" > "$OUTPUT"
 }
 
 DEDUPED_COUNT=$(jq length "$OUTPUT" 2>/dev/null || echo "0")
