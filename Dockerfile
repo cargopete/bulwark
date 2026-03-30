@@ -51,8 +51,8 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir solc-select \
     && solc-select install 0.8.27 \
     && solc-select use 0.8.27
 
-# ── Claude Code ──────────────────────────────────────────────────────
-RUN npm install -g @anthropic-ai/claude-code
+# ── Claude Code (native installer) ───────────────────────────────────
+RUN curl -fsSL https://claude.ai/install.sh | sh
 
 # ── Create audit user (non-root for safety) ──────────────────────────
 RUN useradd -m -s /bin/bash auditor \
