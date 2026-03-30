@@ -27,9 +27,9 @@ claude -p "$(cat prompts/red-agent.md)" --max-turns 80
 
 Agents write their findings directly to `audit-workspace/findings/<agent>-raw.json`.
 
-## Pass 3 (TODO)
+## Pass 3
 
-- `poc-generator.md` — Foundry PoC writer for validated findings
+- `poc-generator.md` — Foundry PoC writer. Receives one finding, writes a compilable test. Retries on build failure with error context.
 
 ## Pass 6 (TODO)
 
