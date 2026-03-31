@@ -71,10 +71,10 @@ The pipeline installs 70 third-party skills into Claude's commands directory. Th
 - [x] Pass 6: Adversarial review works — severity upgrades, compound attacks, blind spots, full report.
 
 **Remaining from Phase 0:**
-- [ ] Fix Pass 4 `--match-contract Invariant` filter to match generated test names
+- [x] Fix Pass 4 test filter — copy tests into forge project, use `--match-path` instead of `--match-contract`
+- [x] Remove debug eprintln lines from Pass 4 (fuzzing.rs)
 - [ ] Improve Pass 3: add test harness template or use sonnet for PoC generation
 - [ ] Check agent logs — are they reading recon output? Using installed skills?
-- [ ] Remove debug eprintln lines from Pass 4 (fuzzing.rs)
 
 ## Phase 1: Wire skills into the pipeline ✓ DONE
 

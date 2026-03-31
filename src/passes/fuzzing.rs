@@ -49,7 +49,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     let tests_exist = count_sol_files(&invariant_dir) > 0;
 
+    // Copy generated tests into the forge project so forge can find them
+    let forge_test_dir = build_dir.join("test/invariant");
     if tests_exist {
+        std::fs::create_dir_all(&forge_test_dir)?;
+        copy_sol_files(&invariant_dir, &forge_test_dir)?;
+
         eprintln!("  Compiling invariant tests...");
         let build_result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
         if build_result.success {
@@ -76,8 +81,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             forge_bin.to_str().unwrap_or("forge"),
             &[
                 "test",
-                "--match-contract",
-                "Invariant",
+                "--match-path",
+                "test/invariant/*",
                 "--fuzz-runs",
                 &fuzz_runs_str,
                 "--invariant-depth",
@@ -215,7 +220,6 @@ async fn generate_invariant_tests(
     let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
     let prompt_path = prompts_dir.join("invariant-generator.md");
 
-    eprintln!("  Prompt path: {}", prompt_path.display());
     if !prompt_path.exists() || !ctx.config.has_tool("claude") {
         eprintln!("  Claude or prompt not available — skipping test generation");
         eprintln!(
@@ -229,13 +233,10 @@ async fn generate_invariant_tests(
         Ok(b) => b,
         Err(_) => return 0,
     };
-    eprintln!("  Claude binary: {}", claude_bin.display());
-
     let base_prompt = match std::fs::read_to_string(&prompt_path) {
         Ok(p) => p,
         Err(_) => return 0,
     };
-    eprintln!("  Prompt loaded ({} bytes)", base_prompt.len());
 
     let prompt = format!(
         "{base_prompt}\n\n---\n\n## Context Files\n\n\
@@ -258,12 +259,25 @@ async fn generate_invariant_tests(
         model: Some(ctx.config.model.clone()),
     };
 
-    eprintln!("  Launching Claude for invariant generation (max-turns={})...", ctx.config.passes.fuzzing.max_turns);
     match session.run().await {
         Ok(output) => eprintln!("  Claude exited with code {}", output.exit_code),
         Err(e) => eprintln!("  Claude session error: {e}"),
     }
     count_sol_files(invariant_dir)
+}
+
+fn copy_sol_files(src: &Path, dest: &Path) -> Result<()> {
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "sol") {
+                if let Some(name) = path.file_name() {
+                    std::fs::copy(&path, dest.join(name))?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn count_sol_files(dir: &Path) -> usize {
