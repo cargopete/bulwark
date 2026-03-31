@@ -272,4 +272,4 @@ cargo build --release
 
 ## License
 
-Private — The Graph Protocol internal tooling.
+[MIT](LICENSE)
