@@ -187,7 +187,7 @@ audit-workspace/
 [target]
 repo = "https://github.com/graphprotocol/contracts.git"
 scope = ["packages/horizon", "packages/subgraph-service"]
-core_contracts = ["HorizonStaking", "GraphPayments", "PaymentsEscrow", ...]
+core_contracts = ["HorizonStaking", "GraphPayments", "PaymentsEscrow"]
 
 # Claude model for AI passes: "haiku" (cheapest), "sonnet", or "opus"
 model = "haiku"
