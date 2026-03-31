@@ -332,6 +332,11 @@ async fn map_entry_points(ctx: &PipelineContext, forge_bin: &Path) -> Result<Val
             .to_string();
 
         for contract in &ctx.config.target.core_contracts {
+            // Skip contracts already inspected from a previous package
+            if entry_points.get(contract).is_some() {
+                continue;
+            }
+
             let abi = forge::inspect_abi(forge_bin, &pkg_path, contract).await?;
             let Some(abi) = abi else { continue };
             let Some(abi_arr) = abi.as_array() else {
@@ -411,6 +416,11 @@ async fn extract_storage_layouts(ctx: &PipelineContext, forge_bin: &Path) -> Res
         }
 
         for contract in &ctx.config.target.core_contracts {
+            // Skip contracts already inspected from a previous package
+            if storage.get(contract).is_some() {
+                continue;
+            }
+
             let layout = forge::inspect_storage_layout(forge_bin, &pkg_path, contract).await?;
             let Some(layout) = layout else { continue };
 
@@ -681,11 +691,14 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
     let log_file = recon_dir.join("scv-scan.log");
 
     let prompt = format!(
-        "Run /tob-scv-scan on the following Solidity files in scope:\n\n\
+        "You MUST complete these two steps:\n\n\
+         STEP 1: Run /tob-scv-scan on the following Solidity files in scope:\n\n\
          {file_list}\n\n\
-         Write the complete scan results as JSON to: {}\n\n\
-         Focus on the 36 vulnerability classes covered by scv-scan. \
-         Output must be a JSON array of findings.",
+         STEP 2: After the scan completes, write the results as a JSON array to this EXACT path:\n\
+         {}\n\n\
+         The file MUST contain a JSON array of finding objects. If the scan produces no findings, \
+         write an empty array: []\n\n\
+         Do NOT skip writing the file. The pipeline depends on this output existing.",
         output_path.display()
     );
 
@@ -694,7 +707,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         prompt,
         max_turns: ctx.config.passes.recon.scv_scan_max_turns,
         working_dir: ctx.audit_dir.clone(),
-        log_file,
+        log_file: log_file.clone(),
         model: Some(ctx.config.model.clone()),
     };
 
@@ -707,7 +720,15 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
             .unwrap_or(0);
         Ok(format!("{count} findings"))
     } else {
-        Ok("completed (no output file written)".into())
+        // Fallback: try to extract findings from the Claude log
+        let findings = claude::extract_findings_from_log(&log_file)?;
+        if !findings.is_empty() {
+            let content = serde_json::to_string_pretty(&findings)?;
+            std::fs::write(&output_path, content)?;
+            Ok(format!("{} findings (extracted from log)", findings.len()))
+        } else {
+            Ok("completed (no findings captured)".into())
+        }
     }
 }
 

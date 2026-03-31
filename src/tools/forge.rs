@@ -22,6 +22,9 @@ pub struct BuildResult {
 }
 
 /// Run `forge inspect <contract> abi` and parse the JSON output.
+///
+/// Forge may output compilation messages before the actual JSON,
+/// so we search for the first `[` to find the ABI array.
 pub async fn inspect_abi(
     forge_bin: &Path,
     pkg_dir: &Path,
@@ -39,10 +42,25 @@ pub async fn inspect_abi(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    match serde_json::from_str(&stdout) {
-        Ok(v) => Ok(Some(v)),
-        Err(_) => Ok(None),
+
+    // Try direct parse first
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        return Ok(Some(v));
     }
+
+    // Forge may prefix compilation messages before the JSON array —
+    // find the first `[` and try parsing from there
+    if let Some(start) = stdout.find('[') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout[start..]) {
+            return Ok(Some(v));
+        }
+        // Maybe there's trailing text after the array — try bracket matching
+        if let Some(arr) = crate::tools::claude::try_parse_json_array(&stdout[start..]) {
+            return Ok(Some(serde_json::Value::Array(arr)));
+        }
+    }
+
+    Ok(None)
 }
 
 /// Run `forge inspect <contract> storage-layout` and parse the JSON.
