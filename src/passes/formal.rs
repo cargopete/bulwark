@@ -328,6 +328,10 @@ async fn generate_symbolic_tests(
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("halmos-generation.log"),
         model: Some(ctx.config.passes.formal.model.clone().unwrap_or_else(|| ctx.config.model.clone())),
+        allowed_tools: vec![
+            "Read".into(), "Write".into(), "Edit".into(),
+            "Glob".into(), "Grep".into(), "Bash".into(),
+        ],
     };
 
     let _ = session.run().await;

@@ -11,6 +11,9 @@ pub struct ClaudeSession {
     pub log_file: PathBuf,
     /// Model to use (e.g. "haiku", "sonnet", "opus"). Passed as `--model`.
     pub model: Option<String>,
+    /// Tools the subprocess is allowed to use (passed as `--allowedTools`).
+    /// Empty means no explicit restriction.
+    pub allowed_tools: Vec<String>,
 }
 
 /// Result of a completed Claude session.
@@ -31,6 +34,12 @@ impl ClaudeSession {
 
         if let Some(model) = &self.model {
             cmd.arg("--model").arg(model);
+        }
+
+        if !self.allowed_tools.is_empty() {
+            for tool in &self.allowed_tools {
+                cmd.arg("--allowedTools").arg(tool);
+            }
         }
 
         let output = cmd

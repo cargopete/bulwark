@@ -210,6 +210,7 @@ async fn run_single_agent(
         working_dir: ctx.audit_dir.clone(),
         log_file: log_file.clone(),
         model: Some(ctx.config.model.clone()),
+        allowed_tools: vec![],
     };
 
     let result = session.run().await?;
@@ -321,6 +322,7 @@ async fn run_variant_analysis(
             working_dir: ctx.audit_dir.clone(),
             log_file,
             model: Some(ctx.config.model.clone()),
+            allowed_tools: vec![],
         };
 
         let _ = session.run().await;

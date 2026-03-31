@@ -221,6 +221,7 @@ async fn generate_and_validate_poc(
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.to_path_buf(),
             model: Some(ctx.config.model.clone()),
+            allowed_tools: vec![],
         };
 
         let _ = session.run().await;
@@ -564,6 +565,7 @@ async fn run_fp_check_filter(
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.clone(),
             model: Some(ctx.config.model.clone()),
+            allowed_tools: vec![],
         };
 
         let result = session.run().await;

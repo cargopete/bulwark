@@ -221,6 +221,7 @@ async fn run_adversarial_review(
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("adversarial-review.log"),
         model: Some(ctx.config.model.clone()),
+        allowed_tools: vec![],
     };
 
     let _ = session.run().await;

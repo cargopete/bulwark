@@ -261,6 +261,10 @@ async fn generate_invariant_tests(
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("invariant-generation.log"),
         model: Some(ctx.config.passes.fuzzing.model.clone().unwrap_or_else(|| ctx.config.model.clone())),
+        allowed_tools: vec![
+            "Read".into(), "Write".into(), "Edit".into(),
+            "Glob".into(), "Grep".into(), "Bash".into(),
+        ],
     };
 
     match session.run().await {
