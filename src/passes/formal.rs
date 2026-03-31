@@ -318,7 +318,7 @@ async fn generate_symbolic_tests(
         max_turns: ctx.config.passes.formal.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("halmos-generation.log"),
-        model: Some(ctx.config.model.clone()),
+        model: Some(ctx.config.passes.formal.model.clone().unwrap_or_else(|| ctx.config.model.clone())),
     };
 
     let _ = session.run().await;

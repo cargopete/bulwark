@@ -51,6 +51,7 @@ invariant_depth = 50
 medusa_timeout = 3600
 echidna_limit = 500_000
 max_turns = 40
+model = "sonnet"               # Sonnet for test generation quality
 
 [passes.formal]
 enabled = true
@@ -58,6 +59,7 @@ solver_timeout = 300
 loop_bound = 5
 target_properties = ["P-1", "P-10", "P-15", "P-16", "P-19"]
 max_turns = 30
+model = "sonnet"               # Sonnet for test generation quality
 
 [passes.review]
 enabled = true

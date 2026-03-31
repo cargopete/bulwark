@@ -251,7 +251,7 @@ async fn generate_invariant_tests(
         max_turns: ctx.config.passes.fuzzing.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("invariant-generation.log"),
-        model: Some(ctx.config.model.clone()),
+        model: Some(ctx.config.passes.fuzzing.model.clone().unwrap_or_else(|| ctx.config.model.clone())),
     };
 
     match session.run().await {

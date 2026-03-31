@@ -189,6 +189,10 @@ pub struct FuzzingPassConfig {
 
     #[serde(default = "default_fuzz_turns")]
     pub max_turns: u32,
+
+    /// Override Claude model for test generation (e.g. "sonnet" for better compilation).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl Default for FuzzingPassConfig {
@@ -200,6 +204,7 @@ impl Default for FuzzingPassConfig {
             medusa_timeout: default_medusa_timeout(),
             echidna_limit: default_echidna_limit(),
             max_turns: default_fuzz_turns(),
+            model: None,
         }
     }
 }
@@ -220,6 +225,10 @@ pub struct FormalPassConfig {
 
     #[serde(default = "default_formal_turns")]
     pub max_turns: u32,
+
+    /// Override Claude model for test generation (e.g. "sonnet" for better compilation).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl Default for FormalPassConfig {
@@ -230,6 +239,7 @@ impl Default for FormalPassConfig {
             loop_bound: default_loop_bound(),
             target_properties: vec![],
             max_turns: default_formal_turns(),
+            model: None,
         }
     }
 }
