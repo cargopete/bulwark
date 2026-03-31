@@ -32,7 +32,7 @@ pub async fn inspect_abi(
 ) -> Result<Option<serde_json::Value>> {
     let output = super::run_command(
         forge_bin.to_str().unwrap_or("forge"),
-        &["inspect", contract, "abi"],
+        &["inspect", contract, "abi", "--json"],
         pkg_dir,
     )
     .await?;
@@ -43,19 +43,17 @@ pub async fn inspect_abi(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Try direct parse first (clean output with no compilation noise)
+    // With --json, output should be clean JSON
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout) {
         return Ok(Some(v));
     }
 
-    // Forge often prefixes compilation tables/messages before the JSON ABI.
-    // Search for `[{` — ABI arrays are always arrays of objects, so this
-    // skips empty `[]` arrays that appear in compilation output.
+    // Fallback: forge may still prefix compilation messages before the JSON.
+    // Search for `[{` — ABI arrays are always arrays of objects.
     if let Some(start) = stdout.find("[{") {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout[start..]) {
             return Ok(Some(v));
         }
-        // Trailing text after the array — use bracket matching
         if let Some(arr) = crate::tools::claude::try_parse_json_array(&stdout[start..]) {
             return Ok(Some(serde_json::Value::Array(arr)));
         }
