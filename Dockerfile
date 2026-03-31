@@ -21,10 +21,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
+    cmake \
     curl \
     git \
     jq \
+    libz3-dev \
     python3 \
+    python3-dev \
     python3-pip \
     python3-venv \
     ripgrep \
@@ -49,8 +52,9 @@ RUN python3 -m venv /opt/solidity-tools \
         slither-analyzer \
     && ln -sf /opt/solidity-tools/bin/slither /usr/local/bin/slither
 
-# Mythril is optional — has problematic deps on some platforms
-RUN /opt/solidity-tools/bin/pip install --no-cache-dir mythril \
+# Mythril — needs z3-solver (cmake + libz3-dev) and setuptools<82 (pkg_resources removed in 82)
+RUN /opt/solidity-tools/bin/pip install --no-cache-dir 'setuptools<82' z3-solver \
+    && /opt/solidity-tools/bin/pip install --no-cache-dir mythril \
     && ln -sf /opt/solidity-tools/bin/myth /usr/local/bin/myth \
     || echo "WARNING: Mythril install failed (optional) — continuing without it"
 
