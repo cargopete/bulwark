@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Pass 3: PoC Generation & Validation
+# BULWARK — Pass 3: PoC Generation & Validation
 # ════════════════════════════════════════════════════════════════════════
 # "No PoC, no finding" gate.
 #
@@ -16,12 +16,12 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-PROMPTS_DIR="$DOYRAN_ROOT/prompts"
+PROMPTS_DIR="$BULWARK_ROOT/prompts"
 POCS_DIR="$WORKSPACE/pocs"
 LOGS_DIR="$WORKSPACE/pocs/logs"
 MERGED_FINDINGS="$WORKSPACE/findings/merged-deduplicated.json"
-MAX_TURNS="${DOYRAN_POC_MAX_TURNS:-30}"
-MAX_RETRIES="${DOYRAN_POC_RETRIES:-2}"
+MAX_TURNS="${BULWARK_POC_MAX_TURNS:-30}"
+MAX_RETRIES="${BULWARK_POC_RETRIES:-2}"
 
 mkdir -p "$POCS_DIR" "$LOGS_DIR"
 

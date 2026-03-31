@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Pass 2: Multi-Agent Adversarial Analysis
+# BULWARK — Pass 2: Multi-Agent Adversarial Analysis
 # ════════════════════════════════════════════════════════════════════════
 # Three independent Claude Code sessions run in parallel:
 #   RED agent  — attacker persona, exploit-focused
@@ -14,10 +14,10 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-PROMPTS_DIR="$DOYRAN_ROOT/prompts"
+PROMPTS_DIR="$BULWARK_ROOT/prompts"
 FINDINGS_DIR="$WORKSPACE/findings"
 LOGS_DIR="$WORKSPACE/findings/logs"
-MAX_TURNS="${DOYRAN_MAX_TURNS:-80}"
+MAX_TURNS="${BULWARK_MAX_TURNS:-80}"
 
 mkdir -p "$FINDINGS_DIR" "$LOGS_DIR"
 

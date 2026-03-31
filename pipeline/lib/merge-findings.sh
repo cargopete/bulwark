@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Finding Merge & Deduplication Utility
+# BULWARK — Finding Merge & Deduplication Utility
 # ════════════════════════════════════════════════════════════════════════
 # Merges findings from multiple agents, deduplicates by dedup_hash,
 # and resolves severity conflicts.

@@ -2,7 +2,7 @@ pub mod claude;
 pub mod forge;
 pub mod slither;
 
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use std::path::Path;
 use std::process::Output;
 use tokio::process::Command;
@@ -25,7 +25,7 @@ pub async fn run_command_strict(program: &str, args: &[&str], cwd: &Path) -> Res
     let output = run_command(program, args, cwd).await?;
 
     if !output.status.success() {
-        return Err(DoyranError::CommandFailed {
+        return Err(BulwarkError::CommandFailed {
             command: format!("{program} {}", args.join(" ")),
             code: output.status.code().unwrap_or(-1),
             stderr: String::from_utf8_lossy(&output.stderr)

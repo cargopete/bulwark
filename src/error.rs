@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(thiserror::Error, Debug)]
-pub enum DoyranError {
+pub enum BulwarkError {
     #[error("pass '{pass}' prerequisite not met: {reason}")]
     PrerequisiteNotMet { pass: String, reason: String },
 
@@ -47,7 +47,7 @@ pub enum DoyranError {
     TomlParse(#[from] toml::de::Error),
 }
 
-pub type Result<T> = std::result::Result<T, DoyranError>;
+pub type Result<T> = std::result::Result<T, BulwarkError>;
 
 #[cfg(test)]
 mod tests {
@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn prerequisite_not_met_display_message() {
-        let err = DoyranError::PrerequisiteNotMet {
+        let err = BulwarkError::PrerequisiteNotMet {
             pass: "poc".into(),
             reason: "merged findings not found".into(),
         };
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn tool_not_found_display_message() {
-        let err = DoyranError::ToolNotFound {
+        let err = BulwarkError::ToolNotFound {
             tool: "forge".into(),
             hint: "curl -L https://foundry.paradigm.xyz | bash".into(),
         };
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn agent_failed_display_message() {
-        let err = DoyranError::AgentFailed {
+        let err = BulwarkError::AgentFailed {
             agent: "red".into(),
             elapsed: 120,
             reason: "non-zero exit".into(),
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn agent_timeout_display_message() {
-        let err = DoyranError::AgentTimeout {
+        let err = BulwarkError::AgentTimeout {
             agent: "blue".into(),
             timeout: 3600,
         };
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn config_error_display_message() {
-        let err = DoyranError::Config("missing required field".into());
+        let err = BulwarkError::Config("missing required field".into());
         let msg = err.to_string();
         assert!(msg.contains("config error"));
         assert!(msg.contains("missing required field"));
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn command_failed_display_message() {
-        let err = DoyranError::CommandFailed {
+        let err = BulwarkError::CommandFailed {
             command: "forge build".into(),
             code: 1,
             stderr: "compilation failed".into(),
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn schema_validation_display_message() {
-        let err = DoyranError::SchemaValidation {
+        let err = BulwarkError::SchemaValidation {
             file: PathBuf::from("findings.json"),
             errors: vec!["missing field: severity".into()],
         };

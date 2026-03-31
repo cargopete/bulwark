@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Doyran Recon Report",
+  "title": "Bulwark Recon Report",
   "description": "Schema for Pass 1 (Reconnaissance) output",
   "type": "object",
   "required": ["generated", "pass", "contracts_compiled", "entry_points", "slither_summary"],

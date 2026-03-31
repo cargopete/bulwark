@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Pass 4: Fuzzing Campaign
+# BULWARK — Pass 4: Fuzzing Campaign
 # ════════════════════════════════════════════════════════════════════════
 # 1. Claude generates invariant tests from PROPERTIES.md
 # 2. Foundry runs invariant tests (fast, ~10 minutes)
@@ -14,14 +14,14 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-PROMPTS_DIR="$DOYRAN_ROOT/prompts"
+PROMPTS_DIR="$BULWARK_ROOT/prompts"
 FUZZ_DIR="$WORKSPACE/fuzzing"
 INVARIANT_DIR="$FUZZ_DIR/invariant-tests"
 RESULTS_DIR="$FUZZ_DIR/fuzzing-campaign-results"
 LOGS_DIR="$FUZZ_DIR/logs"
-MAX_TURNS="${DOYRAN_FUZZ_MAX_TURNS:-40}"
-FOUNDRY_FUZZ_RUNS="${DOYRAN_FUZZ_RUNS:-10000}"
-FOUNDRY_INVARIANT_DEPTH="${DOYRAN_INVARIANT_DEPTH:-50}"
+MAX_TURNS="${BULWARK_FUZZ_MAX_TURNS:-40}"
+FOUNDRY_FUZZ_RUNS="${BULWARK_FUZZ_RUNS:-10000}"
+FOUNDRY_INVARIANT_DEPTH="${BULWARK_INVARIANT_DEPTH:-50}"
 
 mkdir -p "$INVARIANT_DIR" "$RESULTS_DIR" "$LOGS_DIR"
 
@@ -166,7 +166,7 @@ fi
 MEDUSA_FINDINGS='[]'
 
 if command -v medusa >/dev/null 2>&1 && [ "$TESTS_EXIST" = true ]; then
-    MEDUSA_TIMEOUT="${DOYRAN_MEDUSA_TIMEOUT:-3600}"
+    MEDUSA_TIMEOUT="${BULWARK_MEDUSA_TIMEOUT:-3600}"
     log_info "Running Medusa extended fuzzing (timeout=${MEDUSA_TIMEOUT}s)..."
 
     MEDUSA_OUTPUT=$(cd "$BUILD_DIR" && medusa fuzz \
@@ -195,7 +195,7 @@ fi
 # ── Step 5: Echidna extended fuzzing (optional) ──────────────────────
 
 if command -v echidna >/dev/null 2>&1 && [ "$TESTS_EXIST" = true ]; then
-    ECHIDNA_LIMIT="${DOYRAN_ECHIDNA_LIMIT:-500000}"
+    ECHIDNA_LIMIT="${BULWARK_ECHIDNA_LIMIT:-500000}"
     log_info "Running Echidna (test-limit=$ECHIDNA_LIMIT)..."
 
     ECHIDNA_OUTPUT=$(cd "$BUILD_DIR" && echidna . \

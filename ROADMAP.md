@@ -1,6 +1,6 @@
-# Doyran Roadmap
+# Bulwark Roadmap
 
-Status of doyran vs the target architecture from the AI-augmented audit toolkit report.
+Status of bulwark vs the target architecture from the AI-augmented audit toolkit report.
 
 ## Current State (v0.1)
 
@@ -16,7 +16,7 @@ Status of doyran vs the target architecture from the AI-augmented audit toolkit 
 | **Pass 6: Review** | **Untested** | Adversarial review session + markdown/JSON report generation. No missing deps — just needs testing. |
 | **Docker container** | **Working** | Ubuntu 24.04, Forge, Slither, Claude Code, Node 22. Builds and runs |
 | **CLI** | **Working** | run, status, findings, validate, report, doctor, login. All subcommands implemented |
-| **Config** | **Working** | doyran.toml with per-pass settings, tool paths, target scope |
+| **Config** | **Working** | bulwark.toml with per-pass settings, tool paths, target scope |
 | **Skills installation** | **Working** | 36 Trail of Bits + 28 curated + 6 forefy skills auto-installed at container startup |
 | **Context files** | **Working** | AUDIT_CONTEXT.md, PROPERTIES.md, KNOWN_ISSUES.md, ATTACK_PATTERNS.md — copied into audit dir |
 | **Finding merge/dedup** | **Working** | Hash-based dedup, severity disagreement tracking, found-by attribution |
@@ -64,7 +64,7 @@ The pipeline installs 70 third-party skills into Claude's commands directory. Th
 - [x] Fix settings.json runtime overwrite (backup/restore pattern)
 - [x] Run Pass 2 with Write enabled — 40 raw findings, 12 unique after merge ✓
 - [x] Run Pass 3 — runs but PoCs fail to compile (Graph dependency tree too complex for Haiku)
-- [x] Default model to haiku, configurable via doyran.toml
+- [x] Default model to haiku, configurable via bulwark.toml
 - [ ] Debug Pass 4 hang (Claude session not launching)
 - [ ] Test Pass 6 (adversarial review — no missing deps)
 - [ ] Improve Pass 3: add test harness template or use sonnet for PoC generation
@@ -152,16 +152,16 @@ RUN curl -L https://github.com/crytic/echidna/releases/latest/... -o /usr/local/
 
 What we have now, polished:
 ```
-doyran run                          # full 6-pass sweep
-doyran run --pass 1-3               # quick sweep (recon + agents + PoC)
-doyran run --pass 2 --agent red     # targeted single-agent
+bulwark run                          # full 6-pass sweep
+bulwark run --pass 1-3               # quick sweep (recon + agents + PoC)
+bulwark run --pass 2 --agent red     # targeted single-agent
 ```
 
 ### 3b. Grant review mode
 
 Lighter workflow for reviewing untrusted grant recipient code:
 ```
-doyran review --mode grant <repo-url>
+bulwark review --mode grant <repo-url>
 ```
 - Clones repo into sandboxed workspace
 - Runs: entry-point-analyzer + scv-scan + code-maturity-assessor + fp-check
@@ -172,7 +172,7 @@ doyran review --mode grant <repo-url>
 
 Diff-focused workflow for protocol upgrades:
 ```
-doyran review --mode upgrade --base main --head feature-branch
+bulwark review --mode upgrade --base main --head feature-branch
 ```
 - Runs: differential-review on the diff
 - Runs: spec-to-code-compliance against GIP specs
@@ -182,7 +182,7 @@ doyran review --mode upgrade --base main --head feature-branch
 
 ### 3d. Config-driven workflow selection
 
-Add to doyran.toml:
+Add to bulwark.toml:
 ```toml
 [workflow]
 mode = "bounty"  # bounty | grant | upgrade
@@ -205,7 +205,7 @@ mode = "bounty"  # bounty | grant | upgrade
 
 - After human triage, record which findings were true/false positives
 - Store in `audit-workspace/triage/` as JSON
-- `doyran stats` command to compute FPR across engagements
+- `bulwark stats` command to compute FPR across engagements
 - Track per-agent FPR (is RED more accurate than GOLD?)
 
 ### 4c. Automated triage gates
@@ -224,8 +224,8 @@ Auto-tag findings: `gate_passed: [1,2,3,4,5,6]` or `gate_failed: [3]`.
 
 ## Phase 5: Operational polish
 
-- [ ] `doyran init <repo-url>` — scaffold a new audit engagement
-- [ ] `doyran diff --base main` — quick upgrade review without full pipeline
+- [ ] `bulwark init <repo-url>` — scaffold a new audit engagement
+- [ ] `bulwark diff --base main` — quick upgrade review without full pipeline
 - [ ] Progress persistence — resume from last completed pass after container restart
 - [ ] Findings dashboard — HTML report with filtering, not just CLI table
 - [ ] Cost tracking — estimate token usage per pass

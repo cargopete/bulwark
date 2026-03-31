@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Doyran Finding",
+  "title": "Bulwark Finding",
   "description": "Schema for a single audit finding across all pipeline passes",
   "type": "object",
   "required": ["id", "source", "severity", "confidence", "title", "contract", "function", "attack_scenario"],

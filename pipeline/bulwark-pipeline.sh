@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Pipeline Orchestrator
+# BULWARK — Pipeline Orchestrator
 # ════════════════════════════════════════════════════════════════════════
 # Runs the six-pass audit pipeline sequentially.
 #
 # Usage:
-#   ./pipeline/doyran-pipeline.sh                    # Full pipeline
-#   ./pipeline/doyran-pipeline.sh --pass 1           # Recon only
-#   ./pipeline/doyran-pipeline.sh --pass 1-3         # Passes 1 through 3
-#   ./pipeline/doyran-pipeline.sh --resume 3         # Resume from Pass 3
+#   ./pipeline/bulwark-pipeline.sh                    # Full pipeline
+#   ./pipeline/bulwark-pipeline.sh --pass 1           # Recon only
+#   ./pipeline/bulwark-pipeline.sh --pass 1-3         # Passes 1 through 3
+#   ./pipeline/bulwark-pipeline.sh --resume 3         # Resume from Pass 3
 #
 # Each pass produces structured JSON in audit-workspace/.
 # All inter-pass communication is via files, not in-context conversation.
@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: doyran-pipeline.sh [OPTIONS]"
+            echo "Usage: bulwark-pipeline.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --pass N       Run only pass N"
@@ -73,12 +73,12 @@ printf "${BOLD}${CYAN}"
 cat << 'BANNER'
     ╔═══════════════════════════════════════════════════════════╗
     ║                                                           ║
-    ║   ██████╗  ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗   ║
-    ║   ██╔══██╗██╔═══██╗╚██╗ ██╔╝██╔══██╗██╔══██╗████╗  ██║   ║
-    ║   ██║  ██║██║   ██║ ╚████╔╝ ██████╔╝███████║██╔██╗ ██║   ║
-    ║   ██║  ██║██║   ██║  ╚██╔╝  ██╔══██╗██╔══██║██║╚██╗██║   ║
-    ║   ██████╔╝╚██████╔╝   ██║   ██║  ██║██║  ██║██║ ╚████║   ║
-    ║   ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ║
+    ║   ██████╗ ██╗   ██╗██╗    ██╗    ██╗ █████╗ ██████╗ ██╗  ██╗  ║
+    ║   ██╔══██╗██║   ██║██║    ██║    ██║██╔══██╗██╔══██╗██║ ██╔╝  ║
+    ║   ██████╔╝██║   ██║██║    ██║ █╗ ██║███████║██████╔╝█████╔╝   ║
+    ║   ██╔══██╗██║   ██║██║    ██║███╗██║██╔══██║██╔══██╗██╔═██╗   ║
+    ║   ██████╔╝╚██████╔╝███████╗╚███╔███╔╝██║  ██║██║  ██║██║  ██╗  ║
+    ║   ╚═════╝  ╚═════╝ ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝  ║
     ║                                                           ║
     ║   Multi-Pass Smart Contract Audit Pipeline                ║
     ║   The Graph Protocol                                      ║
@@ -105,7 +105,7 @@ fi
 CLAUDE_AUTH=false
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     CLAUDE_AUTH=true
-elif [ -f "$DOYRAN_ROOT/.claude/.credentials.json" ]; then
+elif [ -f "$BULWARK_ROOT/.claude/.credentials.json" ]; then
     CLAUDE_AUTH=true
 elif command -v claude >/dev/null 2>&1; then
     # Check if claude can authenticate

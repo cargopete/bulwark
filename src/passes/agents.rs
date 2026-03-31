@@ -1,4 +1,4 @@
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use crate::findings::merge;
 use crate::findings::Finding;
 use crate::pipeline::pass::PipelineContext;
@@ -17,7 +17,7 @@ use tokio::task::JoinSet;
 pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<String> {
     // Preflight: verify Pass 1 outputs exist
     if !ctx.workspace.recon_summary().exists() {
-        return Err(DoyranError::PrerequisiteNotMet {
+        return Err(BulwarkError::PrerequisiteNotMet {
             pass: "agents".into(),
             reason: "Pass 1 recon outputs not found. Run Pass 1 first.".into(),
         });
@@ -30,7 +30,7 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     let agents: Vec<String> = if let Some(filter) = agent_filter {
         let filter_lower = filter.to_lowercase();
         if !all_agents.iter().any(|a| a.to_lowercase() == filter_lower) {
-            return Err(DoyranError::PrerequisiteNotMet {
+            return Err(BulwarkError::PrerequisiteNotMet {
                 pass: "agents".into(),
                 reason: format!(
                     "unknown agent '{}' — available: {}",
@@ -46,13 +46,13 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
 
     let max_turns = ctx.config.passes.agents.max_turns;
     let timeout = Duration::from_secs(ctx.config.passes.agents.timeout_minutes * 60);
-    let prompts_dir = ctx.doyran_root.join(&ctx.config.prompts.dir);
+    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
 
     // Verify prompts exist
     for agent in &agents {
         let prompt_file = prompts_dir.join(format!("{agent}-agent.md"));
         if !prompt_file.exists() {
-            return Err(DoyranError::PrerequisiteNotMet {
+            return Err(BulwarkError::PrerequisiteNotMet {
                 pass: "agents".into(),
                 reason: format!("prompt not found: {}", prompt_file.display()),
             });
@@ -119,7 +119,7 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         results
     })
     .await
-    .map_err(|_| DoyranError::PassTimeout {
+    .map_err(|_| BulwarkError::PassTimeout {
         pass: "agents".into(),
         timeout: timeout.as_secs(),
     })?;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════
-# DOYRAN — Pass 5: Formal Verification
+# BULWARK — Pass 5: Formal Verification
 # ════════════════════════════════════════════════════════════════════════
 # Bounded model checking via Halmos on critical properties:
 #   P-10 (provider-first slashing) — most critical
@@ -15,12 +15,12 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-PROMPTS_DIR="$DOYRAN_ROOT/prompts"
+PROMPTS_DIR="$BULWARK_ROOT/prompts"
 FORMAL_DIR="$WORKSPACE/formal"
 LOGS_DIR="$FORMAL_DIR/logs"
-MAX_TURNS="${DOYRAN_HALMOS_MAX_TURNS:-30}"
-SOLVER_TIMEOUT="${DOYRAN_SOLVER_TIMEOUT:-300}"
-LOOP_BOUND="${DOYRAN_LOOP_BOUND:-5}"
+MAX_TURNS="${BULWARK_HALMOS_MAX_TURNS:-30}"
+SOLVER_TIMEOUT="${BULWARK_SOLVER_TIMEOUT:-300}"
+LOOP_BOUND="${BULWARK_LOOP_BOUND:-5}"
 
 mkdir -p "$FORMAL_DIR" "$LOGS_DIR"
 

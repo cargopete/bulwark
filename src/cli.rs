@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "doyran",
+    name = "bulwark",
     about = "Multi-pass smart contract audit pipeline for The Graph Protocol",
     version
 )]
 pub struct Cli {
     /// Path to configuration file
-    #[arg(short, long, default_value = "doyran.toml")]
+    #[arg(short, long, default_value = "bulwark.toml")]
     pub config: PathBuf,
 
     /// Audit target directory (overrides config)

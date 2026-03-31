@@ -23,12 +23,12 @@ use workspace::Workspace;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialise tracing: DOYRAN_LOG=debug for verbose, default is warn
+    // Initialise tracing: BULWARK_LOG=debug for verbose, default is warn
     // User-facing output uses styled eprintln; tracing is for diagnostics.
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("DOYRAN_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("doyran=warn")),
+            tracing_subscriber::EnvFilter::try_from_env("BULWARK_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("bulwark=warn")),
         )
         .with_target(false)
         .without_time()
@@ -37,11 +37,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    // Resolve config: CWD first, then $DOYRAN_ROOT fallback
+    // Resolve config: CWD first, then $BULWARK_ROOT fallback
     let config_path = if cli.config.exists() {
         cli.config.clone()
-    } else if let Ok(root) = std::env::var("DOYRAN_ROOT") {
-        let root_config = PathBuf::from(&root).join("doyran.toml");
+    } else if let Ok(root) = std::env::var("BULWARK_ROOT") {
+        let root_config = PathBuf::from(&root).join("bulwark.toml");
         if root_config.exists() { root_config } else { cli.config.clone() }
     } else {
         cli.config.clone()
@@ -54,12 +54,12 @@ async fn main() -> anyhow::Result<()> {
         .audit_dir
         .or_else(|| std::env::var("AUDIT_DIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| {
-            let doyran_root = std::env::var("DOYRAN_ROOT")
+            let bulwark_root = std::env::var("BULWARK_ROOT")
                 .unwrap_or_else(|_| "/home/auditor".into());
-            PathBuf::from(doyran_root).join("audits/graph-contracts")
+            PathBuf::from(bulwark_root).join("audits/graph-contracts")
         });
 
-    let doyran_root = std::env::var("DOYRAN_ROOT")
+    let bulwark_root = std::env::var("BULWARK_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             cli.config
@@ -69,10 +69,10 @@ async fn main() -> anyhow::Result<()> {
         });
 
     match cli.command {
-        Commands::Run(args) => cmd_run(config, audit_dir, doyran_root, args).await?,
+        Commands::Run(args) => cmd_run(config, audit_dir, bulwark_root, args).await?,
         Commands::Status(args) => cmd_status(config, audit_dir, args)?,
         Commands::Findings(args) => cmd_findings(config, audit_dir, args)?,
-        Commands::Validate(args) => cmd_validate(config, audit_dir, doyran_root, args)?,
+        Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
 async fn cmd_run(
     config: Config,
     audit_dir: PathBuf,
-    doyran_root: PathBuf,
+    bulwark_root: PathBuf,
     args: cli::RunArgs,
 ) -> anyhow::Result<()> {
     let (start, end) = if let Some(range) = args.pass {
@@ -95,7 +95,7 @@ async fn cmd_run(
         (1, 6)
     };
 
-    let orchestrator = Orchestrator::new(config, audit_dir, doyran_root, start, end, args.agent)?;
+    let orchestrator = Orchestrator::new(config, audit_dir, bulwark_root, start, end, args.agent)?;
     let results = orchestrator.run().await?;
 
     // Exit with error code if any pass failed
@@ -121,7 +121,7 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
     if status.passes.is_empty() {
         eprintln!("No pipeline runs recorded yet.");
         eprintln!(
-            "Run: doyran run --pass 1    (to start with reconnaissance)"
+            "Run: bulwark run --pass 1    (to start with reconnaissance)"
         );
         return Ok(());
     }
@@ -254,11 +254,11 @@ fn cmd_findings(
 fn cmd_validate(
     config: Config,
     audit_dir: PathBuf,
-    doyran_root: PathBuf,
+    bulwark_root: PathBuf,
     args: cli::ValidateArgs,
 ) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
-    let schemas_dir = doyran_root.join(&config.schemas.dir);
+    let schemas_dir = bulwark_root.join(&config.schemas.dir);
     let finding_schema = schemas_dir.join("finding.schema.json");
 
     if !finding_schema.exists() {
@@ -313,7 +313,7 @@ fn cmd_report(
     args: cli::ReportArgs,
 ) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
-    let doyran_root = std::env::var("DOYRAN_ROOT")
+    let bulwark_root = std::env::var("BULWARK_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
 
@@ -321,7 +321,7 @@ fn cmd_report(
         config,
         workspace: ws,
         audit_dir,
-        doyran_root,
+        bulwark_root,
     };
 
     eprintln!(
@@ -355,7 +355,7 @@ fn cmd_report(
 fn cmd_doctor(config: Config) -> anyhow::Result<()> {
     let in_docker = docker::is_in_docker();
     let label = if in_docker { "container" } else { "host" };
-    eprintln!("{}\n", style(format!("Doyran Doctor ({label})")).bold());
+    eprintln!("{}\n", style(format!("Bulwark Doctor ({label})")).bold());
 
     if !in_docker {
         // Host-side: check Docker
@@ -373,7 +373,7 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
         eprintln!();
         eprintln!(
             "  Audit tools live inside the Docker container.\n  \
-             Run: docker compose run --rm audit-env doyran doctor"
+             Run: docker compose run --rm audit-env bulwark doctor"
         );
         eprintln!();
         return Ok(());
@@ -415,7 +415,7 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
     if !auth.is_authenticated() {
         eprintln!(
             "\n  To authenticate: {}",
-            style("doyran login").bold()
+            style("bulwark login").bold()
         );
     }
 

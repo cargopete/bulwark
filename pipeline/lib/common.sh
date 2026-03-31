@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Shared utilities for the doyran pipeline.
+# Shared utilities for the bulwark pipeline.
 # Source this file from any pass script: source "$(dirname "$0")/lib/common.sh"
 
 set -euo pipefail
 
 # ── Paths ──────────────────────────────────────────────────────────────
-DOYRAN_ROOT="${DOYRAN_ROOT:-/home/auditor}"
-AUDIT_DIR="${AUDIT_DIR:-$DOYRAN_ROOT/audits/graph-contracts}"
+BULWARK_ROOT="${BULWARK_ROOT:-/home/auditor}"
+AUDIT_DIR="${AUDIT_DIR:-$BULWARK_ROOT/audits/graph-contracts}"
 WORKSPACE="${WORKSPACE:-$AUDIT_DIR/audit-workspace}"
-CONTEXT_DIR="${CONTEXT_DIR:-$DOYRAN_ROOT/context}"
+CONTEXT_DIR="${CONTEXT_DIR:-$BULWARK_ROOT/context}"
 
 # ── Colours (disabled if not a terminal) ───────────────────────────────
 if [ -t 1 ]; then

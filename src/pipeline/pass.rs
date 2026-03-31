@@ -8,7 +8,7 @@ pub struct PipelineContext {
     pub config: Config,
     pub workspace: Workspace,
     pub audit_dir: PathBuf,
-    pub doyran_root: PathBuf,
+    pub bulwark_root: PathBuf,
 }
 
 /// Result of executing a single pass.

@@ -9,7 +9,7 @@ AUDIT_TARGET="${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}"
 AUDIT_BRANCH="${AUDIT_BRANCH:-main}"
 
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║  Doyran — Graph Protocol Audit Pipeline                  ║"
+echo "║  Bulwark — Graph Protocol Audit Pipeline                  ║"
 echo "║  Multi-pass · Multi-agent · PoC-gated                   ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
@@ -105,7 +105,7 @@ if [ -d "packages/subgraph-service" ]; then
 fi
 
 # ── Restore Claude Code settings (something overwrites ours during setup) ─
-cp /home/auditor/.doyran-settings.json /home/auditor/.claude/settings.json 2>/dev/null || true
+cp /home/auditor/.bulwark-settings.json /home/auditor/.claude/settings.json 2>/dev/null || true
 
 # ── Print status (only in interactive mode) ──────────────────────────
 cd "$AUDIT_DIR"
@@ -120,15 +120,15 @@ echo "════════════════════════�
 echo "  Ready. Working directory: $AUDIT_DIR"
 echo ""
 echo "  Available commands:"
-echo "    doyran run                   — Run full 6-pass pipeline"
-echo "    doyran run --pass 1          — Recon only (no AI)"
-echo "    doyran run --pass 2-3        — Agents + PoC Gate"
-echo "    doyran run --pass 2 --agent red  — Single agent run"
-echo "    doyran status                — Pipeline status"
-echo "    doyran findings              — List findings"
-echo "    doyran report                — Regenerate report"
-echo "    doyran doctor                — Check tool availability"
-echo "    doyran login                 — Authenticate Claude"
+echo "    bulwark run                   — Run full 6-pass pipeline"
+echo "    bulwark run --pass 1          — Recon only (no AI)"
+echo "    bulwark run --pass 2-3        — Agents + PoC Gate"
+echo "    bulwark run --pass 2 --agent red  — Single agent run"
+echo "    bulwark status                — Pipeline status"
+echo "    bulwark findings              — List findings"
+echo "    bulwark report                — Regenerate report"
+echo "    bulwark doctor                — Check tool availability"
+echo "    bulwark login                 — Authenticate Claude"
 echo "    claude                       — Claude Code (interactive)"
 echo ""
 echo "  Installed tools:"

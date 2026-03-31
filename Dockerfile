@@ -8,7 +8,7 @@ COPY Cargo.toml Cargo.lock* ./
 COPY src/ src/
 
 # Build release binary
-RUN cargo build --release && strip target/release/doyran
+RUN cargo build --release && strip target/release/bulwark
 
 # ══════════════════════════════════════════════════════════════════════
 # Stage 2: Runtime image with all audit tooling
@@ -81,8 +81,8 @@ ENV PATH="/home/auditor/.foundry/bin:${PATH}"
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/auditor/.local/bin:${PATH}"
 
-# ── Copy Doyran CLI binary from builder ──────────────────────────────
-COPY --from=builder --chown=auditor:auditor /build/target/release/doyran /usr/local/bin/doyran
+# ── Copy Bulwark CLI binary from builder ──────────────────────────────
+COPY --from=builder --chown=auditor:auditor /build/target/release/bulwark /usr/local/bin/bulwark
 
 # ── Directory structure ──────────────────────────────────────────────
 RUN mkdir -p \
@@ -97,20 +97,20 @@ RUN mkdir -p \
 
 # ── Copy config, scripts, and pipeline assets ────────────────────────
 COPY --chown=auditor:auditor config/settings.json /home/auditor/.claude/settings.json
-COPY --chown=auditor:auditor config/settings.json /home/auditor/.doyran-settings.json
+COPY --chown=auditor:auditor config/settings.json /home/auditor/.bulwark-settings.json
 COPY --chown=auditor:auditor config/CLAUDE.md /home/auditor/.claude/CLAUDE.md
 COPY --chown=auditor:auditor context/ /home/auditor/context/
 COPY --chown=auditor:auditor scripts/ /home/auditor/scripts/
 COPY --chown=auditor:auditor pipeline/ /home/auditor/pipeline/
 COPY --chown=auditor:auditor prompts/ /home/auditor/prompts/
 COPY --chown=auditor:auditor schemas/ /home/auditor/schemas/
-COPY --chown=auditor:auditor doyran.toml /home/auditor/doyran.toml
+COPY --chown=auditor:auditor bulwark.toml /home/auditor/bulwark.toml
 RUN chmod +x /home/auditor/scripts/*.sh \
     && chmod +x /home/auditor/pipeline/*.sh \
     && chmod +x /home/auditor/pipeline/lib/*.sh
 
-ENV DOYRAN_ROOT="/home/auditor"
-ENV DOYRAN_CONTAINER="1"
+ENV BULWARK_ROOT="/home/auditor"
+ENV BULWARK_CONTAINER="1"
 
 ENTRYPOINT ["/home/auditor/scripts/entrypoint.sh"]
 CMD ["bash"]

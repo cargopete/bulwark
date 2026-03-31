@@ -212,9 +212,10 @@ async fn generate_invariant_tests(
     invariant_dir: &Path,
     logs_dir: &Path,
 ) -> usize {
-    let prompts_dir = ctx.doyran_root.join(&ctx.config.prompts.dir);
+    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
     let prompt_path = prompts_dir.join("invariant-generator.md");
 
+    eprintln!("  Prompt path: {}", prompt_path.display());
     if !prompt_path.exists() || !ctx.config.has_tool("claude") {
         eprintln!("  Claude or prompt not available — skipping test generation");
         eprintln!(
@@ -228,11 +229,13 @@ async fn generate_invariant_tests(
         Ok(b) => b,
         Err(_) => return 0,
     };
+    eprintln!("  Claude binary: {}", claude_bin.display());
 
     let base_prompt = match std::fs::read_to_string(&prompt_path) {
         Ok(p) => p,
         Err(_) => return 0,
     };
+    eprintln!("  Prompt loaded ({} bytes)", base_prompt.len());
 
     let prompt = format!(
         "{base_prompt}\n\n---\n\n## Context Files\n\n\
@@ -255,7 +258,11 @@ async fn generate_invariant_tests(
         model: Some(ctx.config.model.clone()),
     };
 
-    let _ = session.run().await;
+    eprintln!("  Launching Claude for invariant generation (max-turns={})...", ctx.config.passes.fuzzing.max_turns);
+    match session.run().await {
+        Ok(output) => eprintln!("  Claude exited with code {}", output.exit_code),
+        Err(e) => eprintln!("  Claude session error: {e}"),
+    }
     count_sol_files(invariant_dir)
 }
 

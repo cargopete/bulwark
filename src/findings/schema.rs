@@ -1,9 +1,9 @@
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use std::path::Path;
 
 /// Validate each element of a JSON array against a schema.
 pub fn validate_findings_array(findings: &serde_json::Value, schema_path: &Path) -> Result<()> {
-    let arr = findings.as_array().ok_or_else(|| DoyranError::SchemaValidation {
+    let arr = findings.as_array().ok_or_else(|| BulwarkError::SchemaValidation {
         file: schema_path.to_path_buf(),
         errors: vec!["expected JSON array".into()],
     })?;
@@ -12,7 +12,7 @@ pub fn validate_findings_array(findings: &serde_json::Value, schema_path: &Path)
     let schema: serde_json::Value = serde_json::from_str(&schema_content)?;
 
     let validator = jsonschema::validator_for(&schema).map_err(|e| {
-        DoyranError::SchemaValidation {
+        BulwarkError::SchemaValidation {
             file: schema_path.to_path_buf(),
             errors: vec![format!("failed to compile schema: {e}")],
         }
@@ -28,7 +28,7 @@ pub fn validate_findings_array(findings: &serde_json::Value, schema_path: &Path)
     if all_errors.is_empty() {
         Ok(())
     } else {
-        Err(DoyranError::SchemaValidation {
+        Err(BulwarkError::SchemaValidation {
             file: schema_path.to_path_buf(),
             errors: all_errors,
         })

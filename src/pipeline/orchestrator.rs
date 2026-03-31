@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use crate::pipeline::checkpoint::PipelineStatus;
 use crate::pipeline::pass::{PassNumber, PassResult, PassStatus, PipelineContext};
 use crate::tools::claude;
@@ -20,7 +20,7 @@ impl Orchestrator {
     pub fn new(
         config: Config,
         audit_dir: PathBuf,
-        doyran_root: PathBuf,
+        bulwark_root: PathBuf,
         start: u8,
         end: u8,
         agent_filter: Option<String>,
@@ -32,7 +32,7 @@ impl Orchestrator {
                 config,
                 workspace,
                 audit_dir,
-                doyran_root,
+                bulwark_root,
             },
             start_pass: start,
             end_pass: end,
@@ -209,7 +209,7 @@ impl Orchestrator {
 
     fn preflight(&self) -> Result<()> {
         if !self.ctx.audit_dir.exists() {
-            return Err(DoyranError::PrerequisiteNotMet {
+            return Err(BulwarkError::PrerequisiteNotMet {
                 pass: "preflight".into(),
                 reason: format!(
                     "audit directory not found: {}",
@@ -222,19 +222,19 @@ impl Orchestrator {
 
     fn print_banner(&self) {
         let banner = r#"
-    ╔═══════════════════════════════════════════════════════════╗
-    ║                                                           ║
-    ║   ██████╗  ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗   ║
-    ║   ██╔══██╗██╔═══██╗╚██╗ ██╔╝██╔══██╗██╔══██╗████╗  ██║   ║
-    ║   ██║  ██║██║   ██║ ╚████╔╝ ██████╔╝███████║██╔██╗ ██║   ║
-    ║   ██║  ██║██║   ██║  ╚██╔╝  ██╔══██╗██╔══██║██║╚██╗██║   ║
-    ║   ██████╔╝╚██████╔╝   ██║   ██║  ██║██║  ██║██║ ╚████║   ║
-    ║   ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ║
-    ║                                                           ║
-    ║   v2 — Multi-Pass Smart Contract Audit Pipeline           ║
-    ║   The Graph Protocol                                      ║
-    ║                                                           ║
-    ╚═══════════════════════════════════════════════════════════╝
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║                                                               ║
+    ║   ██████╗ ██╗   ██╗██╗  ██╗    ██╗ █████╗ ██████╗ ██╗  ██╗   ║
+    ║   ██╔══██╗██║   ██║██║  ██║    ██║██╔══██╗██╔══██╗██║ ██╔╝   ║
+    ║   ██████╔╝██║   ██║██║  ██║ █╗ ██║███████║██████╔╝█████╔╝    ║
+    ║   ██╔══██╗██║   ██║██║  ██║███╗██║██╔══██║██╔══██╗██╔═██╗    ║
+    ║   ██████╔╝╚██████╔╝███████╗╚███╔███╔╝██║  ██║██║  ██║██║  ██╗║
+    ║   ╚═════╝  ╚═════╝ ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝║
+    ║                                                               ║
+    ║   Multi-Pass Smart Contract Audit Pipeline                    ║
+    ║   The Graph Protocol                                          ║
+    ║                                                               ║
+    ╚═══════════════════════════════════════════════════════════════╝
 "#;
         eprintln!("{}", style(banner).cyan().bold());
     }

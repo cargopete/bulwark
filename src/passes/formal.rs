@@ -278,7 +278,7 @@ async fn generate_symbolic_tests(
     formal_dir: &Path,
     logs_dir: &Path,
 ) -> usize {
-    let prompts_dir = ctx.doyran_root.join(&ctx.config.prompts.dir);
+    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
     let prompt_path = prompts_dir.join("halmos-generator.md");
 
     if !prompt_path.exists() || !ctx.config.has_tool("claude") {

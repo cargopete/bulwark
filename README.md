@@ -1,4 +1,4 @@
-# Doyran
+# Bulwark
 
 Multi-pass, multi-agent smart contract audit pipeline for The Graph Protocol.
 Rust CLI + Docker container with Slither, Forge, Claude Code, and 70 AI audit skills.
@@ -27,27 +27,27 @@ docker compose run --rm -it audit-env bash
 ```bash
 # Option A: API key (set ANTHROPIC_API_KEY in .env before docker compose run)
 # Option B: Interactive login
-doyran login
+bulwark login
 ```
 
 ### 4. Run the pipeline
 
 ```bash
-doyran run --pass 1          # Recon only (no AI, no auth needed)
-doyran run --pass 1-3        # Recon + Agents + PoC Gate
-doyran run                   # Full 6-pass pipeline
-doyran run --pass 2 --agent red  # Single agent run
+bulwark run --pass 1          # Recon only (no AI, no auth needed)
+bulwark run --pass 1-3        # Recon + Agents + PoC Gate
+bulwark run                   # Full 6-pass pipeline
+bulwark run --pass 2 --agent red  # Single agent run
 ```
 
 ### 5. Check results
 
 ```bash
-doyran status                # Which passes completed
-doyran findings              # List findings with severity
-doyran findings --severity high
-doyran report                # Regenerate final report
-doyran validate              # Check JSON against schemas
-doyran doctor                # Check tool availability
+bulwark status                # Which passes completed
+bulwark findings              # List findings with severity
+bulwark findings --severity high
+bulwark report                # Regenerate final report
+bulwark validate              # Check JSON against schemas
+bulwark doctor                # Check tool availability
 ```
 
 ## Pipeline
@@ -172,7 +172,7 @@ audit-workspace/
 
 ## Configuration
 
-`doyran.toml` controls everything:
+`bulwark.toml` controls everything:
 
 ```toml
 [target]
@@ -201,7 +201,7 @@ invariant_depth = 50
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | For AI passes | — | Or use `doyran login` |
+| `ANTHROPIC_API_KEY` | For AI passes | — | Or use `bulwark login` |
 | `AUDIT_TARGET` | No | graphprotocol/contracts | Git repo URL |
 | `AUDIT_BRANCH` | No | `main` | Branch to audit |
 

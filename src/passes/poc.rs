@@ -1,4 +1,4 @@
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use crate::findings::{Finding, Severity};
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let merged_path = ctx.workspace.merged_findings();
     if !merged_path.exists() {
-        return Err(DoyranError::PrerequisiteNotMet {
+        return Err(BulwarkError::PrerequisiteNotMet {
             pass: "poc".into(),
             reason: "Pass 2 findings not found. Run Pass 2 first.".into(),
         });
@@ -37,11 +37,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let forge_bin = ctx.config.resolve_tool("forge")?;
     let max_turns = ctx.config.passes.poc.max_turns;
     let max_retries = ctx.config.passes.poc.max_retries;
-    let prompts_dir = ctx.doyran_root.join(&ctx.config.prompts.dir);
+    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
     let poc_prompt_path = prompts_dir.join("poc-generator.md");
 
     if !poc_prompt_path.exists() {
-        return Err(DoyranError::PrerequisiteNotMet {
+        return Err(BulwarkError::PrerequisiteNotMet {
             pass: "poc".into(),
             reason: format!("prompt not found: {}", poc_prompt_path.display()),
         });

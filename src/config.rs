@@ -1,4 +1,4 @@
-use crate::error::{DoyranError, Result};
+use crate::error::{BulwarkError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -322,7 +322,7 @@ fn default_model() -> String {
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path).map_err(|e| {
-            DoyranError::Config(format!("failed to read config at {}: {e}", path.display()))
+            BulwarkError::Config(format!("failed to read config at {}: {e}", path.display()))
         })?;
         let config: Config = toml::from_str(&content)?;
         Ok(config)
@@ -345,13 +345,13 @@ impl Config {
             if path.exists() {
                 return Ok(path);
             }
-            return Err(DoyranError::ToolNotFound {
+            return Err(BulwarkError::ToolNotFound {
                 tool: name.into(),
                 hint: format!("configured path does not exist: {p}"),
             });
         }
 
-        which::which(name).map_err(|_| DoyranError::ToolNotFound {
+        which::which(name).map_err(|_| BulwarkError::ToolNotFound {
             tool: name.into(),
             hint: install_hint(name),
         })
