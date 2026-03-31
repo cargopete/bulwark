@@ -97,13 +97,21 @@ Generate invariant tests for these properties (read PROPERTIES.md for full descr
 | Multi-provision | Create provisions across data services, slash | No cross-service interference |
 | Operator sequences | All operator actions in random order | No value extraction |
 
-## Before You Start
+## Before You Start — COMPILATION IS MANDATORY
 
-1. Read `PROPERTIES.md` — the invariants you're testing
-2. Read `audit-workspace/recon/entry-points.json` — function signatures for handlers
-3. Read existing test setup in `packages/horizon/test/` — reuse their deployment patterns
-4. Read `audit-workspace/recon/storage-layouts.json` — understand state structure
-5. Check `packages/horizon/foundry.toml` for compiler config and remappings
+1. Read `remappings.txt` in the project root — these are the ONLY valid import paths
+2. Read `foundry.toml` — check `src`, `test`, `libs`, `solc` settings
+3. Read at least 2-3 existing test files in the `test/` directory — copy their exact import style, pragma version, and deployment patterns
+4. Read `PROPERTIES.md` — the invariants you're testing
+5. Read `audit-workspace/recon/entry-points.json` — function signatures for handlers
+6. Read `audit-workspace/recon/storage-layouts.json` — understand state structure
+
+**CRITICAL**: Your tests MUST compile with `forge build`. To ensure this:
+- Copy import paths exactly from existing tests — do NOT guess import paths
+- Use the same pragma solidity version as existing tests
+- Use the same base contracts and deployment helpers as existing tests
+- After writing each file, run `forge build` to verify it compiles before moving on
+- If it fails, read the error, fix the imports, and try again
 
 ## Output
 
@@ -117,5 +125,5 @@ Create separate files for each domain:
 - `InvariantOperator.t.sol` — P-19, P-20
 - `Handler.sol` — shared handler contract with all fuzzable actions
 
-Every file must compile. Use `deal()` for token setup, `vm.prank()` for callers.
+Use `deal()` for token setup, `vm.prank()` for callers.
 If a contract interface is unclear, read the source first — do not guess function signatures.

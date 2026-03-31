@@ -301,12 +301,21 @@ async fn generate_symbolic_tests(
         "Halmos is NOT installed. Generate compilable tests anyway — they serve as documentation."
     };
 
+    let test_infra = super::scan_test_infrastructure(ctx);
+
     let prompt = format!(
         "{base_prompt}\n\n---\n\n## Context Files\n\n\
          Read these files:\n\
          - PROPERTIES.md (the properties to verify)\n\
          - AUDIT_CONTEXT.md (protocol overview)\n\
          - audit-workspace/recon/entry-points.json (function signatures)\n\n\
+         ## Project Build Infrastructure\n\n\
+         CRITICAL: Read the remappings and foundry.toml below carefully. Your tests \
+         MUST use these exact import paths or they will not compile.\n\
+         {test_infra}\n\n\
+         Before writing any test, read at least one existing test file from the list above \
+         to understand the import patterns, deployment setup, and test base contracts used \
+         in this project. Mirror their style exactly.\n\n\
          ## Halmos Availability\n\n{halmos_note}\n\n\
          ## Output Directory\n\nWrite all test files and the assessment JSON to: {}\n",
         formal_dir.display()

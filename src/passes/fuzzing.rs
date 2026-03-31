@@ -233,6 +233,8 @@ async fn generate_invariant_tests(
         Err(_) => return 0,
     };
 
+    let test_infra = super::scan_test_infrastructure(ctx);
+
     let prompt = format!(
         "{base_prompt}\n\n---\n\n## Context Files\n\n\
          Read these files for protocol context:\n\
@@ -241,6 +243,13 @@ async fn generate_invariant_tests(
          - ATTACK_PATTERNS.md (known patterns to target)\n\
          - audit-workspace/recon/entry-points.json (function signatures)\n\
          - audit-workspace/recon/storage-layouts.json (state structure)\n\n\
+         ## Project Build Infrastructure\n\n\
+         CRITICAL: Read the remappings and foundry.toml below carefully. Your tests \
+         MUST use these exact import paths or they will not compile.\n\
+         {test_infra}\n\n\
+         Before writing any test, read at least one existing test file from the list above \
+         to understand the import patterns, deployment setup, and test base contracts used \
+         in this project. Mirror their style exactly.\n\n\
          ## Output Directory\n\nWrite all test files to: {}\n",
         invariant_dir.display()
     );

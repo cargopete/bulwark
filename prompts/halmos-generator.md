@@ -129,13 +129,22 @@ Ordered by priority and Halmos suitability:
 - State-heavy tests (many storage slots) increase solving time dramatically
 - If a test takes > 30 minutes, mark it as TIMEOUT and recommend fuzzing instead
 
-## Before You Start
+## Before You Start — COMPILATION IS MANDATORY
 
-1. Read `PROPERTIES.md` — the properties you're verifying
-2. Read the source code of target contracts, focusing on the specific functions
-3. Read `audit-workspace/recon/entry-points.json` for function signatures
-4. Check if `halmos-cheatcodes` is available (it may need installing)
-5. Read `packages/horizon/foundry.toml` for compiler config
+1. Read `remappings.txt` in the project root — these are the ONLY valid import paths
+2. Read `foundry.toml` — check `src`, `test`, `libs`, `solc` settings
+3. Read at least 2-3 existing test files in the `test/` directory — copy their exact import style, pragma version, and deployment patterns
+4. Read `PROPERTIES.md` — the properties you're verifying
+5. Read the source code of target contracts, focusing on the specific functions
+6. Read `audit-workspace/recon/entry-points.json` for function signatures
+7. Check if `halmos-cheatcodes` is available — if not, skip the `SymTest` import and use plain `forge-std/Test.sol`
+
+**CRITICAL**: Your tests MUST compile with `forge build`. To ensure this:
+- Copy import paths exactly from existing tests — do NOT guess import paths
+- Use the same pragma solidity version as existing tests
+- Use the same base contracts and deployment helpers as existing tests
+- After writing each file, run `forge build` to verify it compiles before moving on
+- If it fails, read the error, fix the imports, and try again
 
 ## Output
 
