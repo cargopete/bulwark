@@ -58,6 +58,11 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir 'setuptools<82' z3-solver
     && ln -sf /opt/solidity-tools/bin/myth /usr/local/bin/myth \
     || echo "WARNING: Mythril install failed (optional) — continuing without it"
 
+# Halmos — bounded model checker for Solidity (used by Pass 5)
+RUN /opt/solidity-tools/bin/pip install --no-cache-dir halmos \
+    && ln -sf /opt/solidity-tools/bin/halmos /usr/local/bin/halmos \
+    || echo "WARNING: Halmos install failed (optional) — continuing without it"
+
 # ── Foundry (Forge, Cast, Anvil) ────────────────────────────────────
 RUN curl -L https://foundry.paradigm.xyz | bash \
     && /root/.foundry/bin/foundryup

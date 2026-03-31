@@ -40,12 +40,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     }
 
     // ── Step 2: Compile invariant tests ─────────────────────────────
-    let build_dir = ctx.audit_dir.join("packages/horizon");
-    let build_dir = if build_dir.exists() {
-        build_dir
-    } else {
-        ctx.audit_dir.clone()
-    };
+    let build_dir = ctx.build_dir();
 
     let tests_exist = count_sol_files(&invariant_dir) > 0;
 

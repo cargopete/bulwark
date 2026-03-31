@@ -11,6 +11,31 @@ pub struct PipelineContext {
     pub bulwark_root: PathBuf,
 }
 
+impl PipelineContext {
+    /// Resolve the primary Foundry build directory.
+    ///
+    /// Tries each scope entry in order, returning the first that exists and
+    /// contains a `foundry.toml`. Falls back to the first existing scope dir,
+    /// then to `audit_dir`.
+    pub fn build_dir(&self) -> PathBuf {
+        // Prefer a scope dir with foundry.toml
+        for pkg in &self.config.target.scope {
+            let pkg_path = self.audit_dir.join(pkg);
+            if pkg_path.join("foundry.toml").exists() {
+                return pkg_path;
+            }
+        }
+        // Fall back to first scope dir that exists
+        for pkg in &self.config.target.scope {
+            let pkg_path = self.audit_dir.join(pkg);
+            if pkg_path.exists() {
+                return pkg_path;
+            }
+        }
+        self.audit_dir.clone()
+    }
+}
+
 /// Result of executing a single pass.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PassResult {

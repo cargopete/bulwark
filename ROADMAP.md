@@ -116,34 +116,36 @@ The pipeline installs 70 third-party skills into Claude's commands directory. Th
 
 ### 2a. Install missing tools in Docker
 
-```dockerfile
-# Halmos (formal verification)
-RUN pip3 install halmos
+- [x] Halmos installed (pip, in solidity-tools venv)
+- [ ] Medusa (fuzzer) — not yet installed
+- [ ] Echidna (fuzzer) — not yet installed
 
-# Medusa (fuzzer)
-RUN curl -L https://github.com/crytic/medusa/releases/latest/... -o /usr/local/bin/medusa
+### 2b. Cross-cutting fixes
 
-# Echidna (fuzzer)
-RUN curl -L https://github.com/crytic/echidna/releases/latest/... -o /usr/local/bin/echidna
-```
+- [x] Remove hardcoded `packages/horizon` — added `PipelineContext::build_dir()` that resolves from config scope
+- [x] Pass 4: Copy generated tests into forge project, use `--match-path test/invariant/*`
+- [x] Pass 5: Copy generated tests into forge project (`test/formal/`)
+- [x] Pass 3: Fix `--match-path` absolute path — now relative to build dir
+- [x] Pass 3: Fallback build dir uses `ctx.build_dir()` instead of hardcoded path
+- [x] Pass 6: Report header derives target name from config repo URL
 
-### 2b. Validate Pass 4 (Fuzzing)
+### 2c. Validate Pass 4 (Fuzzing)
 
-- Verify Claude generates valid invariant test files
-- Verify forge runs them and detects broken invariants
-- Test Medusa/Echidna integration if installed
+- [ ] Verify Claude generates valid invariant test files
+- [ ] Verify forge runs them and detects broken invariants
+- [ ] Test Medusa/Echidna integration if installed
 
-### 2c. Validate Pass 5 (Formal)
+### 2d. Validate Pass 5 (Formal)
 
-- Verify Claude generates valid Halmos symbolic tests
-- Verify Halmos runs and produces verification results
-- Map results back to PROPERTIES.md properties
+- [ ] Verify Claude generates valid Halmos symbolic tests
+- [ ] Verify Halmos runs and produces verification results
+- [ ] Map results back to PROPERTIES.md properties
 
-### 2d. Validate Pass 6 (Review)
+### 2e. Validate Pass 6 (Review)
 
-- Run adversarial review on findings from Passes 2-5
-- Verify report generation (markdown + JSON)
-- Check severity challenge and reinstatement logic
+- [ ] Run adversarial review on findings from Passes 2-5
+- [ ] Verify report generation (markdown + JSON)
+- [ ] Check severity challenge and reinstatement logic
 
 **Success criteria**: Full 6-pass run completes with real output at every stage.
 

@@ -43,16 +43,15 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     }
 
     // ── Step 2: Compile ─────────────────────────────────────────────
-    let build_dir = ctx.audit_dir.join("packages/horizon");
-    let build_dir = if build_dir.exists() {
-        build_dir
-    } else {
-        ctx.audit_dir.clone()
-    };
-
+    let build_dir = ctx.build_dir();
     let tests_exist = count_sol_files(&formal_dir) > 0;
 
+    // Copy generated tests into the forge project so forge can find them
+    let forge_test_dir = build_dir.join("test/formal");
     if tests_exist {
+        std::fs::create_dir_all(&forge_test_dir)?;
+        copy_sol_files(&formal_dir, &forge_test_dir)?;
+
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
         let result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
@@ -324,6 +323,20 @@ async fn generate_symbolic_tests(
 
     let _ = session.run().await;
     count_sol_files(formal_dir)
+}
+
+fn copy_sol_files(src: &Path, dest: &Path) -> Result<()> {
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "sol") {
+                if let Some(name) = path.file_name() {
+                    std::fs::copy(&path, dest.join(name))?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn count_sol_files(dir: &Path) -> usize {

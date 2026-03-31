@@ -353,10 +353,12 @@ fn write_markdown_report(
 
     writeln!(f, "# Bulwark Audit Report")?;
     writeln!(f)?;
-    writeln!(
-        f,
-        "**Target**: The Graph Protocol (Horizon Contracts)"
-    )?;
+    let target_name = ctx.config.target.repo
+        .trim_end_matches(".git")
+        .rsplit('/')
+        .next()
+        .unwrap_or("unknown");
+    writeln!(f, "**Target**: {target_name}")?;
     writeln!(f, "**Date**: {date}")?;
     writeln!(f, "**Pipeline**: 6-pass (Recon -> Multi-Agent -> PoC Gate -> Fuzzing -> Formal Verification -> Adversarial Review)")?;
     writeln!(f)?;

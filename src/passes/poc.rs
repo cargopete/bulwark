@@ -269,11 +269,16 @@ async fn generate_and_validate_poc(
         if compiled {
             eprintln!("    {} Compilation successful", style("✓").green());
 
-            // Run the test
+            // Run the test — forge needs a path relative to the project root
             eprintln!("    Running test...");
+            let rel_poc = poc_file
+                .strip_prefix(&build_dir)
+                .unwrap_or(poc_file)
+                .to_string_lossy()
+                .to_string();
             let test_result = crate::tools::run_command(
                 forge_bin.to_str().unwrap_or("forge"),
-                &["test", "--match-path", &poc_file.to_string_lossy(), "-vvv"],
+                &["test", "--match-path", &rel_poc, "-vvv"],
                 &build_dir,
             )
             .await;
@@ -497,8 +502,8 @@ fn find_build_dir(ctx: &PipelineContext, contract: &str) -> PathBuf {
         }
     }
 
-    // Default to horizon
-    ctx.audit_dir.join("packages/horizon")
+    // Fall back to primary build directory from config scope
+    ctx.build_dir()
 }
 
 fn glob_sol_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
