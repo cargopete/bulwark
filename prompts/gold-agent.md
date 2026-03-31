@@ -94,6 +94,21 @@ Read these files in order:
 6. `audit-workspace/recon/entry-points.json` — state-changing functions
 7. `audit-workspace/recon/slither-results.json` — check for divide-before-multiply findings
 
+## Required Skill Invocations
+
+Before diving into manual arithmetic analysis:
+
+1. **Run `/tob-token-integration-analyzer`** on the GRT token handling contracts:
+   - `packages/horizon/contracts/staking/HorizonStaking.sol`
+   - `packages/horizon/contracts/payments/GraphPayments.sol`
+   - `packages/horizon/contracts/payments/PaymentsEscrow.sol`
+   - Use its output to identify token-handling edge cases
+   - If the skill is not available, proceed without it
+
+2. **Run `/tob-scv-scan`** focusing on arithmetic-related vulnerability classes
+   - Cross-reference its findings with your own rounding analysis
+   - If the skill is not available, proceed without it
+
 Then read the actual Solidity source code, focusing on:
 - Every line flagged in `math-operations.json`
 - The delegation pool struct and its manipulation functions

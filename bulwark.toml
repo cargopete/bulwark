@@ -26,17 +26,23 @@ path = "audit-workspace"
 
 [passes.recon]
 enabled = true
+scv_scan = true              # AI vulnerability scan after Slither (requires Claude auth)
+scv_scan_max_turns = 20
 
 [passes.agents]
 enabled = true
 max_turns = 80
 agents = ["red", "blue", "gold"]
 timeout_minutes = 60
+variant_analysis = true      # Search for pattern variants in high/critical findings
+variant_max_turns = 15
 
 [passes.poc]
 enabled = true
 max_turns = 30
 max_retries = 2
+fp_check = true              # Pre-filter findings with false-positive check
+fp_check_max_turns = 10
 
 [passes.fuzzing]
 enabled = true

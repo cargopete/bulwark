@@ -6,6 +6,7 @@ Rust CLI + Docker container with Slither, Forge, Claude Code, and 70 AI audit sk
 > **Status**: All 6 passes tested and completing. Passes 1, 2, 4, 5, 6 produce real output.
 > Pass 3 (PoC Gate) runs but generated PoCs struggle to compile.
 > Halmos/Medusa/Echidna not installed yet — passes work without them.
+> Phase 1 complete: skills (scv-scan, fp-check, variant-analysis) wired into pipeline.
 > See [ROADMAP.md](ROADMAP.md) for full status.
 
 ## Quick Start
@@ -70,7 +71,8 @@ Pass 6: Adversarial Review ──── Fresh Claude session challenges all     
 
 ### Pass 1: Reconnaissance (tested, working)
 
-All Rust, no AI. Produces structured JSON consumed by all later passes:
+Mostly Rust, no AI required. Optionally runs AI-assisted scv-scan after Slither.
+Produces structured JSON consumed by all later passes:
 - Compiles contracts (`forge build`)
 - Runs Slither static analysis (H/M/L severity counts)
 - Maps all external/public state-changing entry points
@@ -133,9 +135,23 @@ The container auto-installs 70 audit skills at startup from three sources:
 | [Trail of Bits skills-curated](https://github.com/trailofbits/skills-curated) | 28 | scv-scan (36 Solidity vuln classes), and others |
 | [forefy/.context](https://github.com/forefy/.context) | 6 | smart-contract-security-audit, foundry-poc, sandboxed-audit-runner, etc. |
 
-These are available to Claude agents during their sessions as slash commands.
-Currently **not explicitly orchestrated** by the pipeline — agents may or may
-not use them. Wiring skills into specific passes is on the roadmap (Phase 1).
+### Pipeline-integrated skills
+
+These skills are explicitly wired into pipeline passes:
+
+| Skill | Where | Purpose |
+|-------|-------|---------|
+| `/tob-scv-scan` | Pass 1 (after Slither) | 36-class vulnerability scan |
+| `/tob-fp-check` | Pass 3 (pre-filter) | False positive gate before PoC generation |
+| `/tob-variant-analysis` | Pass 2 (post-merge) | Pattern search for high/critical findings |
+| `/tob-scv-scan` | RED + GOLD agents | Agents instructed to run before manual analysis |
+| `/tob-fp-check` | BLUE agent | Self-challenge on VIOLATED properties |
+| `/tob-token-integration-analyzer` | GOLD agent | Token-handling edge case detection |
+| `/tob-spec-to-code-compliance` | BLUE agent | Cross-check property verification |
+| `/tob-variant-analysis` | RED agent | Post-analysis variant search |
+
+All skill integrations degrade gracefully — if a skill is not installed, the
+pipeline continues without it.
 
 ## Context Files
 
@@ -192,14 +208,22 @@ core_contracts = ["HorizonStaking", "GraphPayments", "PaymentsEscrow"]
 # Claude model for AI passes: "haiku" (cheapest), "sonnet", or "opus"
 model = "haiku"
 
+[passes.recon]
+scv_scan = true              # AI vulnerability scan after Slither
+scv_scan_max_turns = 20
+
 [passes.agents]
 max_turns = 80
 agents = ["red", "blue", "gold"]
 timeout_minutes = 60
+variant_analysis = true      # Search for pattern variants post-merge
+variant_max_turns = 15
 
 [passes.poc]
 max_turns = 30
 max_retries = 2
+fp_check = true              # False-positive gate before PoC generation
+fp_check_max_turns = 10
 
 [passes.fuzzing]
 fuzz_runs = 10_000

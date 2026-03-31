@@ -60,6 +60,18 @@ Read these files in order:
 7. `audit-workspace/recon/math-operations.json` — arithmetic operations inventory
 8. `audit-workspace/recon/access-control.json` — modifier/role mappings
 
+## Required Skill Invocations
+
+Before starting your manual analysis, run these installed skills:
+
+1. **Run `/tob-scv-scan`** on all contracts in `packages/horizon/contracts/` and `packages/subgraph-service/contracts/`
+   - This scans for 36 vulnerability classes automatically
+   - Use its output to prioritise your manual analysis
+   - If the skill is not available, proceed without it
+
+2. After analysis, **run `/tob-variant-analysis`** on your highest-confidence findings to check for pattern matches elsewhere in the codebase
+   - If the skill is not available, skip this step
+
 Then read the actual Solidity source code for the contracts in your scope.
 
 ## Output Format

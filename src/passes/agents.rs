@@ -165,6 +165,25 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         );
     }
 
+    // ── Variant analysis post-processing ─────────────────────────
+    if ctx.config.passes.agents.variant_analysis {
+        eprintln!("\n  Running variant analysis on high/critical findings...");
+        match run_variant_analysis(ctx, &merge_result.findings).await {
+            Ok(count) if count > 0 => {
+                eprintln!(
+                    "  {} variant-analysis found {count} additional instances",
+                    style("✓").green()
+                );
+            }
+            Ok(_) => {
+                eprintln!("  {} No additional variants found", style("~").yellow());
+            }
+            Err(e) => {
+                eprintln!("  {} variant-analysis skipped: {e}", style("⚠").yellow());
+            }
+        }
+    }
+
     Ok(format!(
         "{} unique findings from {} agents",
         merge_result.findings.len(),
@@ -231,6 +250,99 @@ fn extract_and_save(log_file: &Path, output_file: &Path) -> Result<usize> {
     let content = serde_json::to_string_pretty(&findings)?;
     std::fs::write(output_file, content)?;
     Ok(count)
+}
+
+/// Run variant-analysis on high/critical findings to find pattern matches elsewhere.
+///
+/// Gracefully degrades: skips if skill not installed or Claude not available.
+async fn run_variant_analysis(
+    ctx: &PipelineContext,
+    findings: &[Finding],
+) -> crate::error::Result<usize> {
+    use crate::error::BulwarkError;
+    use crate::findings::Severity;
+
+    if !claude::is_skill_available("tob-variant-analysis") {
+        return Err(BulwarkError::PrerequisiteNotMet {
+            pass: "agents".into(),
+            reason: "tob-variant-analysis skill not installed".into(),
+        });
+    }
+
+    let claude_bin = ctx.config.resolve_tool("claude")?;
+    let logs_dir = ctx.workspace.findings_logs_dir();
+
+    // Only run on High/Critical findings to save tokens
+    let high_findings: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| matches!(f.severity, Severity::High | Severity::Critical))
+        .collect();
+
+    if high_findings.is_empty() {
+        return Ok(0);
+    }
+
+    eprintln!(
+        "    Checking {} high/critical findings for variants...",
+        high_findings.len()
+    );
+
+    let mut all_variants: Vec<serde_json::Value> = Vec::new();
+    let scope_dirs = ctx
+        .config
+        .target
+        .scope
+        .iter()
+        .map(|s| format!("{s}/contracts/"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+
+    for finding in &high_findings {
+        let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
+        let log_file = logs_dir.join(format!("{}-variant.log", finding.id));
+        let variant_file = ctx
+            .workspace
+            .findings_dir()
+            .join(format!("variants-{}.json", finding.id));
+
+        let prompt = format!(
+            "Run /tob-variant-analysis to search for other instances of this vulnerability \
+             pattern in the codebase.\n\n\
+             Finding:\n```json\n{finding_json}\n```\n\n\
+             Search all Solidity files in {scope_dirs} for the same pattern.\n\n\
+             If you find variants, output them as a JSON array to: {}",
+            variant_file.display()
+        );
+
+        let session = ClaudeSession {
+            claude_bin: claude_bin.clone(),
+            prompt,
+            max_turns: ctx.config.passes.agents.variant_max_turns,
+            working_dir: ctx.audit_dir.clone(),
+            log_file,
+            model: Some(ctx.config.model.clone()),
+        };
+
+        let _ = session.run().await;
+
+        // Check for variant output
+        if variant_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&variant_file) {
+                if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+                    all_variants.extend(arr);
+                }
+            }
+        }
+    }
+
+    // Write consolidated variant findings
+    if !all_variants.is_empty() {
+        let path = ctx.workspace.findings_dir().join("variant-analysis.json");
+        let content = serde_json::to_string_pretty(&all_variants)?;
+        std::fs::write(&path, content)?;
+    }
+
+    Ok(all_variants.len())
 }
 
 fn merge_agent_outputs(

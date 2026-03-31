@@ -76,38 +76,37 @@ The pipeline installs 70 third-party skills into Claude's commands directory. Th
 - [ ] Check agent logs — are they reading recon output? Using installed skills?
 - [ ] Remove debug eprintln lines from Pass 4 (fuzzing.rs)
 
-## Phase 1: Wire skills into the pipeline
+## Phase 1: Wire skills into the pipeline ✓ DONE
 
 **Goal**: Stop hoping agents use installed skills and make it explicit.
 
-### 1a. Add scv-scan to Pass 1
+### 1a. Add scv-scan to Pass 1 ✓
 
-Pass 1 currently does its own static analysis (Slither + custom Rust). Add an explicit scv-scan step:
-- After Slither, invoke Claude with the scv-scan slash command
-- Save output to `audit-workspace/recon/scv-scan-results.json`
-- Agent prompts already reference recon output, so findings flow naturally
+- [x] After Slither, invoke Claude with `/tob-scv-scan` slash command
+- [x] Save output to `audit-workspace/recon/scv-scan-results.json`
+- [x] Graceful degradation: skips if skill not installed or Claude not authenticated
+- [x] Configurable via `bulwark.toml`: `scv_scan = true`, `scv_scan_max_turns = 20`
 
-### 1b. Add fp-check as a gate in Pass 3
+### 1b. Add fp-check as a gate in Pass 3 ✓
 
-Currently Pass 3 validates findings by generating PoCs. Add fp-check as a pre-filter:
-- Before PoC generation, run each finding through fp-check
-- Discard findings that fail adversarial challenge
-- Then generate PoCs only for survivors
-- This should reduce wasted Claude turns on false positives
+- [x] Before PoC generation, run each finding through `/tob-fp-check`
+- [x] Discard findings that return FALSE_POSITIVE
+- [x] Fail-open design: skill errors or missing skill = finding passes through
+- [x] Configurable via `bulwark.toml`: `fp_check = true`, `fp_check_max_turns = 10`
 
-### 1c. Tell agents to use specific skills
+### 1c. Tell agents to use specific skills ✓
 
-Update the agent prompts (red/blue/gold) to explicitly invoke installed skills:
-- RED: "Run `/tob-scv-scan` on your target contracts before manual analysis"
-- BLUE: "Use `/tob-fp-check` to challenge each VIOLATED property before reporting"
-- GOLD: "Use `/tob-token-integration-analyzer` on GRT-handling contracts"
+- [x] RED agent: instructed to run `/tob-scv-scan` + `/tob-variant-analysis`
+- [x] BLUE agent: instructed to run `/tob-fp-check` + `/tob-spec-to-code-compliance`
+- [x] GOLD agent: instructed to run `/tob-token-integration-analyzer` + `/tob-scv-scan`
+- [x] All instructions include "if the skill is not available, proceed without it"
 
-### 1d. Add variant-analysis post-processing
+### 1d. Add variant-analysis post-processing ✓
 
-After merge/dedup in Pass 2, run a follow-up Claude session:
-- For each unique finding, invoke variant-analysis
-- Search for the same pattern elsewhere in scope
-- Add any new instances as additional findings
+- [x] After merge/dedup in Pass 2, run `/tob-variant-analysis` on high/critical findings
+- [x] Search for the same pattern elsewhere in scope
+- [x] Write additional instances to `findings/variant-analysis.json`
+- [x] Configurable via `bulwark.toml`: `variant_analysis = true`, `variant_max_turns = 15`
 
 **Success criteria**: Agents explicitly invoke at least 2 skills per session. FPR measurably lower than raw output.
 

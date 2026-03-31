@@ -54,6 +54,16 @@ impl ClaudeSession {
     }
 }
 
+/// Check if a Claude Code slash command (skill) is available.
+///
+/// Skills are markdown files installed to `~/.claude/commands/<name>.md`.
+/// In the Docker container, the install-skills.sh script copies them there.
+pub fn is_skill_available(skill_name: &str) -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = format!("{home}/.claude/commands/{skill_name}.md");
+    std::path::Path::new(&path).exists()
+}
+
 /// Check if Claude Code is authenticated (API key, credentials file, or `claude auth status`).
 pub fn check_auth() -> AuthStatus {
     // Check API key
@@ -293,6 +303,30 @@ some text
         )
         .unwrap();
         assert!(!looks_like_findings(&arr));
+    }
+
+    #[test]
+    fn is_skill_available_returns_false_for_nonexistent_skill() {
+        assert!(!is_skill_available("nonexistent-skill-that-should-never-exist-12345"));
+    }
+
+    #[test]
+    fn is_skill_available_returns_true_for_existing_skill() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let commands_dir = dir.path().join(".claude/commands");
+        std::fs::create_dir_all(&commands_dir).unwrap();
+        std::fs::write(commands_dir.join("test-skill.md"), "# Test Skill").unwrap();
+
+        // Temporarily override HOME (unsafe since Rust 1.85 — process-wide)
+        let original_home = std::env::var("HOME").unwrap_or_default();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+        let result = is_skill_available("test-skill");
+        unsafe {
+            std::env::set_var("HOME", &original_home);
+        }
+        assert!(result);
     }
 
     #[test]

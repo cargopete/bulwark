@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::pipeline::pass::PipelineContext;
+use crate::tools::claude::{self, ClaudeSession};
 use crate::tools::{forge, slither};
 use chrono::Utc;
 use console::style;
@@ -55,6 +56,15 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let slither_summary = aggregate_slither_summary(&slither_combined);
     write_json(&recon_dir.join("slither-results.json"), &slither_combined)?;
     eprintln!("    {} Slither: {slither_summary}", style("✓").green());
+
+    // ── 1.3b AI-assisted vulnerability scan (scv-scan) ────────────
+    if ctx.config.passes.recon.scv_scan {
+        eprintln!("  Running AI vulnerability scan (scv-scan)...");
+        match run_scv_scan(ctx, &recon_dir).await {
+            Ok(summary) => eprintln!("    {} scv-scan: {summary}", style("✓").green()),
+            Err(e) => eprintln!("    {} scv-scan skipped: {e}", style("⚠").yellow()),
+        }
+    }
 
     // ── 1.4 Entry point mapping ───────────────────────────────────
     eprintln!("  Mapping entry points...");
@@ -154,6 +164,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "recon/entry-points.json",
             "recon/storage-layouts.json",
             "recon/slither-results.json",
+            "recon/scv-scan-results.json",
             "recon/dependency-graph.json",
             "recon/math-operations.json",
             "recon/access-control.json",
@@ -624,6 +635,80 @@ fn inventory_math_operations(ctx: &PipelineContext) -> Result<Value> {
     }
 
     Ok(math)
+}
+
+/// Run the tob-scv-scan skill via Claude to scan for 36 vulnerability classes.
+///
+/// Gracefully degrades: skips if skill not installed or Claude not authenticated.
+async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String> {
+    if !claude::is_skill_available("tob-scv-scan") {
+        return Err(crate::error::BulwarkError::PrerequisiteNotMet {
+            pass: "recon".into(),
+            reason: "tob-scv-scan skill not installed".into(),
+        });
+    }
+
+    if !claude::check_auth().is_authenticated() {
+        return Err(crate::error::BulwarkError::PrerequisiteNotMet {
+            pass: "recon".into(),
+            reason: "Claude not authenticated — skipping AI scan".into(),
+        });
+    }
+
+    let claude_bin = ctx.config.resolve_tool("claude")?;
+
+    // Build contract file list for scope
+    let contract_files: Vec<String> = ctx
+        .config
+        .target
+        .scope
+        .iter()
+        .flat_map(|pkg| {
+            let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
+            find_sol_files(&contracts_dir)
+                .into_iter()
+                .filter_map(|p| {
+                    p.strip_prefix(&ctx.audit_dir)
+                        .ok()
+                        .map(|r| r.to_string_lossy().to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let file_list = contract_files.join("\n");
+    let output_path = recon_dir.join("scv-scan-results.json");
+    let log_file = recon_dir.join("scv-scan.log");
+
+    let prompt = format!(
+        "Run /tob-scv-scan on the following Solidity files in scope:\n\n\
+         {file_list}\n\n\
+         Write the complete scan results as JSON to: {}\n\n\
+         Focus on the 36 vulnerability classes covered by scv-scan. \
+         Output must be a JSON array of findings.",
+        output_path.display()
+    );
+
+    let session = ClaudeSession {
+        claude_bin,
+        prompt,
+        max_turns: ctx.config.passes.recon.scv_scan_max_turns,
+        working_dir: ctx.audit_dir.clone(),
+        log_file,
+        model: Some(ctx.config.model.clone()),
+    };
+
+    let _ = session.run().await?;
+
+    if output_path.exists() {
+        let content = std::fs::read_to_string(&output_path)?;
+        let count = serde_json::from_str::<Vec<serde_json::Value>>(&content)
+            .map(|arr| arr.len())
+            .unwrap_or(0);
+        Ok(format!("{count} findings"))
+    } else {
+        Ok("completed (no output file written)".into())
+    }
 }
 
 fn identify_proxies(ctx: &PipelineContext) -> Result<Value> {

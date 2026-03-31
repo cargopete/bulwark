@@ -81,11 +81,24 @@ pub struct PassesConfig {
 pub struct ReconPassConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+
+    /// Run AI-assisted vulnerability scan (scv-scan) after Slither.
+    /// Requires Claude auth and tob-scv-scan skill installed.
+    #[serde(default = "default_true")]
+    pub scv_scan: bool,
+
+    /// Max turns for the scv-scan Claude session.
+    #[serde(default = "default_scv_scan_turns")]
+    pub scv_scan_max_turns: u32,
 }
 
 impl Default for ReconPassConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            scv_scan: true,
+            scv_scan_max_turns: default_scv_scan_turns(),
+        }
     }
 }
 
@@ -102,6 +115,14 @@ pub struct AgentsPassConfig {
 
     #[serde(default = "default_agent_timeout")]
     pub timeout_minutes: u64,
+
+    /// Run variant-analysis on high/critical findings after merge.
+    #[serde(default = "default_true")]
+    pub variant_analysis: bool,
+
+    /// Max turns for each variant-analysis Claude session.
+    #[serde(default = "default_variant_turns")]
+    pub variant_max_turns: u32,
 }
 
 impl Default for AgentsPassConfig {
@@ -111,6 +132,8 @@ impl Default for AgentsPassConfig {
             max_turns: default_max_turns(),
             agents: default_agents(),
             timeout_minutes: default_agent_timeout(),
+            variant_analysis: true,
+            variant_max_turns: default_variant_turns(),
         }
     }
 }
@@ -125,6 +148,14 @@ pub struct PocPassConfig {
 
     #[serde(default = "default_poc_retries")]
     pub max_retries: u32,
+
+    /// Run fp-check on each finding before PoC generation.
+    #[serde(default = "default_true")]
+    pub fp_check: bool,
+
+    /// Max turns for each fp-check Claude session.
+    #[serde(default = "default_fp_check_turns")]
+    pub fp_check_max_turns: u32,
 }
 
 impl Default for PocPassConfig {
@@ -133,6 +164,8 @@ impl Default for PocPassConfig {
             enabled: true,
             max_turns: default_poc_turns(),
             max_retries: default_poc_retries(),
+            fp_check: true,
+            fp_check_max_turns: default_fp_check_turns(),
         }
     }
 }
@@ -315,6 +348,15 @@ fn default_prompts_dir() -> String {
 fn default_schemas_dir() -> String {
     "schemas".into()
 }
+fn default_scv_scan_turns() -> u32 {
+    20
+}
+fn default_variant_turns() -> u32 {
+    15
+}
+fn default_fp_check_turns() -> u32 {
+    10
+}
 fn default_model() -> String {
     "haiku".into()
 }
@@ -472,5 +514,13 @@ core_contracts = ["Test"]
         assert_eq!(config.passes.formal.solver_timeout, 300);
         assert_eq!(config.passes.formal.loop_bound, 5);
         assert_eq!(config.passes.review.max_turns, 60);
+
+        // Phase 1 skill integration defaults
+        assert!(config.passes.recon.scv_scan);
+        assert_eq!(config.passes.recon.scv_scan_max_turns, 20);
+        assert!(config.passes.agents.variant_analysis);
+        assert_eq!(config.passes.agents.variant_max_turns, 15);
+        assert!(config.passes.poc.fp_check);
+        assert_eq!(config.passes.poc.fp_check_max_turns, 10);
     }
 }

@@ -1,7 +1,7 @@
 use crate::error::{BulwarkError, Result};
 use crate::findings::{Finding, Severity};
 use crate::pipeline::pass::PipelineContext;
-use crate::tools::claude::ClaudeSession;
+use crate::tools::claude::{self, ClaudeSession};
 use console::style;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -34,6 +34,20 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     }
 
     let claude_bin = ctx.config.resolve_tool("claude")?;
+
+    // ── Pre-filter: false positive check ─────────────────────────
+    let findings = if ctx.config.passes.poc.fp_check {
+        eprintln!("  Running false-positive check on {} findings...", findings.len());
+        run_fp_check_filter(ctx, &findings, &claude_bin).await?
+    } else {
+        findings
+    };
+
+    if findings.is_empty() {
+        eprintln!("  All findings filtered by fp-check — nothing to validate.");
+        write_json(&ctx.workspace.validated_findings(), &json!([]))?;
+        return Ok("0 findings survived fp-check".into());
+    }
     let forge_bin = ctx.config.resolve_tool("forge")?;
     let max_turns = ctx.config.passes.poc.max_turns;
     let max_retries = ctx.config.passes.poc.max_retries;
@@ -556,6 +570,84 @@ fn extract_solidity_from_log(log_path: &Path, output_path: &Path) {
             .to_string();
         let _ = std::fs::write(output_path, cleaned);
     }
+}
+
+/// Run fp-check on each finding to filter out false positives before PoC generation.
+///
+/// Design: fails open — if the skill is missing or a check errors, the finding passes through.
+async fn run_fp_check_filter(
+    ctx: &PipelineContext,
+    findings: &[Finding],
+    claude_bin: &Path,
+) -> Result<Vec<Finding>> {
+    if !claude::is_skill_available("tob-fp-check") {
+        eprintln!(
+            "    {} fp-check skill not installed, passing all findings through",
+            style("⚠").yellow()
+        );
+        return Ok(findings.to_vec());
+    }
+
+    let logs_dir = ctx.workspace.pocs_dir().join("fp-check-logs");
+    std::fs::create_dir_all(&logs_dir)?;
+
+    let mut survivors = Vec::new();
+    let mut filtered_count = 0;
+
+    for (idx, finding) in findings.iter().enumerate() {
+        eprintln!(
+            "    [{}/{}] fp-check: {} — {}",
+            idx + 1,
+            findings.len(),
+            finding.id,
+            finding.title
+        );
+
+        let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
+        let log_file = logs_dir.join(format!("{}-fp-check.log", finding.id));
+
+        let prompt = format!(
+            "Run /tob-fp-check to challenge this finding. \
+             Be adversarial — try to prove it is a false positive.\n\n\
+             ```json\n{finding_json}\n```\n\n\
+             After analysis, respond with ONLY one of these verdicts on a single line:\n\
+             - CONFIRMED: <one-sentence reason>\n\
+             - FALSE_POSITIVE: <one-sentence reason>\n\
+             - UNCERTAIN: <one-sentence reason>"
+        );
+
+        let session = ClaudeSession {
+            claude_bin: claude_bin.to_path_buf(),
+            prompt,
+            max_turns: ctx.config.passes.poc.fp_check_max_turns,
+            working_dir: ctx.audit_dir.clone(),
+            log_file: log_file.clone(),
+            model: Some(ctx.config.model.clone()),
+        };
+
+        let result = session.run().await;
+
+        // Parse result: check if output contains FALSE_POSITIVE
+        // Fail open: on error, keep the finding
+        let is_fp = result.is_ok()
+            && std::fs::read_to_string(&log_file)
+                .unwrap_or_default()
+                .contains("FALSE_POSITIVE");
+
+        if is_fp {
+            eprintln!("      {} FALSE POSITIVE — filtered", style("✗").red());
+            filtered_count += 1;
+        } else {
+            eprintln!("      {} survived", style("✓").green());
+            survivors.push(finding.clone());
+        }
+    }
+
+    eprintln!(
+        "    fp-check: {filtered_count} filtered, {} survived",
+        survivors.len()
+    );
+    Ok(survivors)
 }
 
 fn write_json(path: &Path, value: &Value) -> Result<()> {

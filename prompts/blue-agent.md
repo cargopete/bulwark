@@ -72,6 +72,17 @@ Read these files in order:
 7. `audit-workspace/recon/dependency-graph.json` — inheritance and call relationships
 8. `audit-workspace/recon/access-control.json` — modifier/role mappings
 
+## Required Skill Invocations
+
+For each property you mark as VIOLATED, you MUST challenge your own conclusion:
+
+1. **Run `/tob-fp-check`** on each VIOLATED property finding before including it in your output
+   - If fp-check says FALSE_POSITIVE and you still believe it's real, include it but note the disagreement
+   - If the skill is not available, proceed without it
+
+2. After completing all 22 property checks, **run `/tob-spec-to-code-compliance`** to cross-check your verification against the contract source
+   - If the skill is not available, skip this step
+
 Then read the actual Solidity source code for each contract as you verify each property.
 
 ## Output Format
