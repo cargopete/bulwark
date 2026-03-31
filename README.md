@@ -1,12 +1,11 @@
 # Bulwark
 
-Multi-pass, multi-agent smart contract audit pipeline for The Graph Protocol.
-Rust CLI + Docker container with Slither, Forge, Claude Code, and 70 AI audit skills.
+Multi-pass, multi-agent smart contract audit pipeline.
+Rust CLI + Docker container with Slither, Forge, Halmos, Claude Code, and 70 AI audit skills.
 
-> **Status**: All 6 passes tested and completing. Passes 1, 2, 4, 5, 6 produce real output.
-> Pass 3 (PoC Gate) runs but generated PoCs struggle to compile.
-> Halmos/Medusa/Echidna not installed yet — passes work without them.
-> Phase 1 complete: skills (scv-scan, fp-check, variant-analysis) wired into pipeline.
+> **Status**: Full 6-pass pipeline runs end-to-end (33 min on Graph Protocol contracts).
+> Pass 1 (Recon), Pass 2 (Agents), Pass 3 (PoC Gate), and Pass 6 (Review) fully operational.
+> Passes 4 & 5 use Sonnet for test generation quality — compilation still needs tuning.
 > See [ROADMAP.md](ROADMAP.md) for full status.
 
 ## Quick Start
@@ -54,35 +53,35 @@ bulwark doctor                # Check tool availability
 ## Pipeline
 
 ```
-Pass 1: Reconnaissance ──────── Deterministic (Slither, Forge, Rust)     [Tested ✓]
+Pass 1: Reconnaissance ──────── Deterministic (Slither, Forge, Rust)
   |
-Pass 2: Multi-Agent Analysis ── 3x parallel Claude (RED/BLUE/GOLD)       [Tested ✓]
+Pass 2: Multi-Agent Analysis ── 3x parallel Claude (RED/BLUE/GOLD)
   |
-Pass 3: PoC Generation ──────── "No PoC, no finding" gate (Forge)        [Runs, PoCs fail to compile]
+Pass 3: PoC Generation ──────── "No PoC, no finding" gate (Forge)
   |
-Pass 4: Fuzzing Campaign ────── Foundry invariant tests + Medusa         [Tested ✓]
+Pass 4: Fuzzing Campaign ────── Foundry invariant tests + Medusa/Echidna
   |                               (runs in parallel with Pass 5)
-Pass 5: Formal Verification ─── Halmos bounded model checking            [Tested ✓]
+Pass 5: Formal Verification ─── Halmos bounded model checking
   |
-Pass 6: Adversarial Review ──── Fresh Claude session challenges all       [Tested ✓]
+Pass 6: Adversarial Review ──── Fresh Claude session challenges all
   |
-  +---> final-report.md
+  +---> final-report.md + final-report.json
 ```
 
-### Pass 1: Reconnaissance (tested, working)
+### Pass 1: Reconnaissance
 
 Mostly Rust, no AI required. Optionally runs AI-assisted scv-scan after Slither.
 Produces structured JSON consumed by all later passes:
 - Compiles contracts (`forge build`)
 - Runs Slither static analysis (H/M/L severity counts)
-- Maps all external/public state-changing entry points
-- Extracts storage layouts via `forge inspect`
+- Maps all external/public state-changing entry points (55 across 5 contracts)
+- Extracts storage layouts via `forge inspect --json`
 - Builds inheritance/dependency graph
 - Enumerates access control modifiers and roles
 - Inventories arithmetic operations (division, multiplication)
 - Identifies proxy relationships
 
-### Pass 2: Multi-Agent Analysis (tested, working — 40 raw → 12 unique findings)
+### Pass 2: Multi-Agent Analysis
 
 Three independent Claude Code sessions run in parallel. Agents cannot see
 each other's output. Each reads Pass 1 recon data + context files + source code.
@@ -94,50 +93,58 @@ each other's output. Each reads Pass 1 recon data + context files + source code.
 | GOLD | DeFi economist | Rounding errors, MEV, flash loans. Must include numbers. |
 
 After completion, findings are merged and deduplicated with severity
-disagreement tracking.
+disagreement tracking. Variant analysis runs on high/critical findings.
 
-### Pass 3: PoC Gate (tested — runs but PoCs fail to compile)
+### Pass 3: PoC Gate
 
 For each finding from Pass 2:
-1. Claude generates a Foundry test PoC
-2. `forge build` — must compile
-3. `forge test` — must demonstrate the vulnerability
-4. Findings that fail are discarded
+1. False-positive check (`/tob-fp-check`) filters obvious FPs
+2. Claude generates a Foundry test PoC
+3. `forge build` — must compile
+4. `forge test` — classify result
+5. Findings that fail to compile are discarded; inconclusive High/Critical capped to Medium
 
-Tested: runs and processes all findings, but generated PoCs fail to compile
-against Graph's complex dependency tree. Likely needs a test harness template
-or a smarter model (sonnet/opus) for this pass.
+### Pass 4: Fuzzing Campaign
 
-### Pass 4: Fuzzing Campaign (tested — generates 6 invariant tests that compile)
+Claude (Sonnet) generates Foundry invariant tests from PROPERTIES.md. Tests are copied
+into the forge project and run with `forge test --match-path test/invariant/*`.
+Medusa and Echidna integration coded but not yet installed.
 
-Claude generates Foundry invariant tests from PROPERTIES.md, Forge compiles and runs them.
-Medusa/Echidna coded but not installed. Known issue: `--match-contract Invariant` filter
-doesn't match generated test names (0 passed / 0 failed) — needs filter or prompt fix.
+### Pass 5: Formal Verification
 
-### Pass 5: Formal Verification (tested — generates 6 symbolic tests that compile)
+Claude (Sonnet) generates symbolic tests for critical properties. Halmos runs bounded
+model checking on each property, producing VERIFIED/VIOLATED/TIMEOUT results.
 
-Claude generates symbolic tests. Halmos not installed so verification doesn't run,
-but tests compile and are ready for when Halmos is added.
+### Pass 6: Adversarial Review
 
-### Pass 6: Adversarial Review (tested — full report generation working)
+Fresh Claude session challenges all findings from passes 2-5. Produces severity
+upgrades, compound attack scenarios, blind spot analysis, and both markdown + JSON reports.
 
-Fresh Claude session challenges all findings. Produces severity upgrades, compound
-attack scenarios, blind spot analysis, and both markdown + JSON reports.
-Tested: 2 severity upgrades, 4 compound attacks, 8 blind spots identified.
+## Model Configuration
+
+The global model defaults to `haiku` (cheapest). Individual passes can override:
+
+```toml
+model = "haiku"                    # Global default
+
+[passes.fuzzing]
+model = "sonnet"                   # Better at generating compilable tests
+
+[passes.formal]
+model = "sonnet"                   # Better at generating compilable tests
+```
 
 ## Installed AI Skills
 
-The container auto-installs 70 audit skills at startup from three sources:
+The container auto-installs 70 audit skills at startup:
 
 | Source | Count | What |
 |--------|-------|------|
-| [Trail of Bits skills](https://github.com/trailofbits/skills) | 36 | entry-point-analyzer, fp-check, variant-analysis, property-based-testing, etc. |
+| [Trail of Bits skills](https://github.com/trailofbits/skills) | 36 | entry-point-analyzer, fp-check, variant-analysis, etc. |
 | [Trail of Bits skills-curated](https://github.com/trailofbits/skills-curated) | 28 | scv-scan (36 Solidity vuln classes), and others |
-| [forefy/.context](https://github.com/forefy/.context) | 6 | smart-contract-security-audit, foundry-poc, sandboxed-audit-runner, etc. |
+| [forefy/.context](https://github.com/forefy/.context) | 6 | smart-contract-security-audit, foundry-poc, etc. |
 
 ### Pipeline-integrated skills
-
-These skills are explicitly wired into pipeline passes:
 
 | Skill | Where | Purpose |
 |-------|-------|---------|
@@ -183,15 +190,23 @@ audit-workspace/
 |   +-- blue-agent-raw.json
 |   +-- gold-agent-raw.json
 |   +-- merged-deduplicated.json
+|   +-- variant-analysis.json
 |   +-- logs/
 +-- pocs/                        # Pass 3
 |   +-- *.t.sol
 |   +-- validated-findings.json
+|   +-- discarded-findings.json
 +-- fuzzing/                     # Pass 4
+|   +-- invariant-tests/
+|   +-- fuzzing-campaign-results/
+|   +-- fuzzing-findings.json
 +-- formal/                      # Pass 5
+|   +-- verification-summary.json
+|   +-- formal-findings.json
 +-- review/                      # Pass 6
-|   +-- final-report.md
-|   +-- final-report.json
+|   +-- adversarial-review.json
++-- final-report.md
++-- final-report.json
 +-- pipeline-status.json
 ```
 
@@ -217,17 +232,25 @@ max_turns = 80
 agents = ["red", "blue", "gold"]
 timeout_minutes = 60
 variant_analysis = true      # Search for pattern variants post-merge
-variant_max_turns = 15
 
 [passes.poc]
 max_turns = 30
 max_retries = 2
 fp_check = true              # False-positive gate before PoC generation
-fp_check_max_turns = 10
 
 [passes.fuzzing]
 fuzz_runs = 10_000
 invariant_depth = 50
+model = "sonnet"             # Override model for test generation
+
+[passes.formal]
+solver_timeout = 300
+loop_bound = 5
+target_properties = ["P-1", "P-10", "P-15", "P-16", "P-19"]
+model = "sonnet"             # Override model for test generation
+
+[passes.review]
+max_turns = 60
 ```
 
 ## Environment Variables
@@ -242,7 +265,7 @@ invariant_depth = 50
 
 ```bash
 cargo check          # Type check
-cargo test           # 66 unit tests
+cargo test           # 68 unit tests
 cargo clippy         # Lint
 cargo build --release
 ```
