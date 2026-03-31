@@ -8,10 +8,10 @@ AUDIT_DIR="/home/auditor/audits/graph-contracts"
 AUDIT_TARGET="${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}"
 AUDIT_BRANCH="${AUDIT_BRANCH:-main}"
 
-echo "╔══════════════════════════════════════════════════════════╗"
-echo "║  Bulwark — Graph Protocol Audit Pipeline                  ║"
-echo "║  Multi-pass · Multi-agent · PoC-gated                   ║"
-echo "╚══════════════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║  Bulwark — Smart Contract Audit Pipeline           ║"
+echo "║  Multi-pass · Multi-agent · PoC-gated              ║"
+echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
 # ── Check Claude Code auth ────────────────────────────────────────────
