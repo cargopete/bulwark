@@ -23,8 +23,8 @@ pub struct BuildResult {
 
 /// Run `forge inspect <contract> abi` and parse the JSON output.
 ///
-/// Forge may output compilation messages before the actual JSON,
-/// so we search for the first `[` to find the ABI array.
+/// Forge prefixes compilation tables and may include empty `[]` arrays
+/// before the actual ABI, so we search for `[{` to find the real data.
 pub async fn inspect_abi(
     forge_bin: &Path,
     pkg_dir: &Path,
@@ -43,18 +43,19 @@ pub async fn inspect_abi(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Try direct parse first
+    // Try direct parse first (clean output with no compilation noise)
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout) {
         return Ok(Some(v));
     }
 
-    // Forge may prefix compilation messages before the JSON array —
-    // find the first `[` and try parsing from there
-    if let Some(start) = stdout.find('[') {
+    // Forge often prefixes compilation tables/messages before the JSON ABI.
+    // Search for `[{` — ABI arrays are always arrays of objects, so this
+    // skips empty `[]` arrays that appear in compilation output.
+    if let Some(start) = stdout.find("[{") {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&stdout[start..]) {
             return Ok(Some(v));
         }
-        // Maybe there's trailing text after the array — try bracket matching
+        // Trailing text after the array — use bracket matching
         if let Some(arr) = crate::tools::claude::try_parse_json_array(&stdout[start..]) {
             return Ok(Some(serde_json::Value::Array(arr)));
         }
