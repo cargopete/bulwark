@@ -100,8 +100,8 @@ impl ClaudeSession {
             Ok(output) if output.exit_code == 124 => {
                 pb.finish_with_message(format!("{label} TIMED OUT"));
             }
-            Ok(output) => {
-                pb.finish_with_message(format!("{label} (exit code {})", output.exit_code));
+            Ok(_output) => {
+                pb.finish_with_message(format!("{label} done (with errors)"));
             }
             Err(_) => {
                 pb.finish_with_message(format!("{label} failed"));

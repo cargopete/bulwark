@@ -50,6 +50,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&invariant_dir, &forge_test_dir)?;
 
+        let invariant_count = count_invariant_functions(&forge_test_dir);
+        eprintln!(
+            "  Found {invariant_count} invariant_ function(s) in test/invariant/"
+        );
+
         eprintln!("  Compiling invariant tests...");
         let build_result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
         if build_result.success {
@@ -77,7 +82,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             &[
                 "test",
                 "--match-path",
-                "test/invariant/*",
+                "test/invariant",
                 "--fuzz-runs",
                 &fuzz_runs_str,
                 "--invariant-depth",
@@ -295,6 +300,23 @@ fn count_sol_files(dir: &Path) -> usize {
                 count += 1;
             } else if path.is_dir() {
                 count += count_sol_files(&path);
+            }
+        }
+    }
+    count
+}
+
+fn count_invariant_functions(dir: &Path) -> usize {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "sol") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    count += content.lines().filter(|l| l.contains("function invariant_")).count();
+                }
+            } else if path.is_dir() {
+                count += count_invariant_functions(&path);
             }
         }
     }

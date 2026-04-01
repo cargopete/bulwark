@@ -1,5 +1,17 @@
 # Bulwark Roadmap
 
+## Known Bugs / Must Fix
+
+| # | Pass | Issue | Priority |
+|---|------|-------|----------|
+| 1 | Pass 4 | Foundry reports "0 passed, 0 failed" — generated test functions don't match Forge naming conventions (`invariant_` prefix required) or contract names don't match the `--match-contract` filter. Fix: enforce naming in the fuzzing prompt AND/OR use `--match-path` instead of `--match-contract`. Confirmed broken on full run 2026-04-01. | **HIGH** |
+| 2 | Pass 4 | Claude exits with code 1 after 33 min but still writes test files — probably hitting turn budget or an error mid-session. Investigate whether exit code 1 means partial output vs total failure. | Medium |
+| 3 | Pass 3 | PoC generation fails to compile against Graph Protocol's complex dependency tree. All PoCs are "inconclusive". Fix: enforce stricter import patterns in prompt, or pre-scaffold a test harness template Claude fills in. | Medium |
+| 4 | Pass 5 | Halmos errors on all 5 properties — generated test functions likely don't match expected `check_P1()`, `check_P10()` etc. signatures. Same class of bug as Pass 4: prompt doesn't enforce naming conventions strictly enough. Fix alongside Pass 4 bug. Confirmed broken 2026-04-01. | **HIGH** |
+| 5 | Pass 4/5 | Medusa and Echidna not installed in Docker — fuzzing campaign is Forge-only. | Low |
+
+---
+
 Status of bulwark vs the target architecture from the AI-augmented audit toolkit report.
 
 ## Current State (v0.1)

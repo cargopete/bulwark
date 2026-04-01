@@ -153,6 +153,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                     style("✓").green()
                 );
                 "VERIFIED"
+            } else if combined.contains("forge build") && combined_lower.contains("error") {
+                eprintln!(
+                    "    {} {prop}: BUILD ERROR — symbolic tests failed to compile",
+                    style("✗").red()
+                );
+                "build_error"
             } else if combined_lower.contains("error") || combined_lower.contains("panic") {
                 eprintln!(
                     "    {} {prop}: ERROR — see halmos-{prop}.log",
@@ -237,11 +243,15 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         .iter()
         .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("TIMEOUT"))
         .collect();
+    let build_errors: Vec<&String> = properties
+        .iter()
+        .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("build_error"))
+        .collect();
     let not_run: Vec<&String> = properties
         .iter()
         .filter(|p| {
             let s = verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()).unwrap_or("");
-            s == "not_run" || s == "no_test"
+            s == "not_run" || s == "no_test" || s == "build_error"
         })
         .collect();
 
@@ -251,6 +261,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "verified": verified,
             "violated": violated,
             "timeout": timeouts,
+            "build_errors": build_errors,
             "not_run": not_run,
         },
         "loop_bound": loop_bound,
