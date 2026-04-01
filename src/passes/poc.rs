@@ -224,7 +224,7 @@ async fn generate_and_validate_poc(
             allowed_tools: vec![],
         };
 
-        let _ = session.run().await;
+        let _ = session.run_with_spinner("Generating PoC...").await;
 
         // Check if PoC file was created
         if !poc_file.exists() {
@@ -568,7 +568,9 @@ async fn run_fp_check_filter(
             allowed_tools: vec![],
         };
 
-        let result = session.run().await;
+        let result = session
+            .run_with_spinner(&format!("Analysing {}...", finding.id))
+            .await;
 
         // Parse result: check if output contains FALSE_POSITIVE
         // Fail open: on error, keep the finding

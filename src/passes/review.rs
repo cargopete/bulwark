@@ -209,11 +209,6 @@ async fn run_adversarial_review(
          Write your review to: audit-workspace/review/adversarial-review.json\n"
     );
 
-    eprintln!(
-        "  Launching adversarial reviewer (max-turns={})...",
-        ctx.config.passes.review.max_turns
-    );
-
     let session = ClaudeSession {
         claude_bin,
         prompt,
@@ -224,7 +219,12 @@ async fn run_adversarial_review(
         allowed_tools: vec![],
     };
 
-    let _ = session.run().await;
+    let _ = session
+        .run_with_spinner(&format!(
+            "Adversarial review (max-turns={})...",
+            ctx.config.passes.review.max_turns
+        ))
+        .await;
 
     let review_file = review_dir.join("adversarial-review.json");
     if review_file.exists() {

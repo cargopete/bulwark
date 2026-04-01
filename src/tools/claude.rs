@@ -1,5 +1,7 @@
 use crate::error::Result;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::process::Command;
 
 /// Configuration for a headless Claude Code session.
@@ -60,6 +62,37 @@ impl ClaudeSession {
             exit_code: output.status.code().unwrap_or(-1),
             log_file: self.log_file.clone(),
         })
+    }
+
+    /// Run the Claude session with an animated spinner showing elapsed time.
+    ///
+    /// Identical to [`run`] but displays a progress spinner on stderr so the
+    /// user can tell the subprocess is still alive during long-running passes.
+    pub async fn run_with_spinner(&self, label: &str) -> Result<ClaudeOutput> {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::with_template("    {spinner:.cyan} {msg} ({elapsed})")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        );
+        pb.set_message(label.to_string());
+        pb.enable_steady_tick(Duration::from_millis(120));
+
+        let result = self.run().await;
+
+        match &result {
+            Ok(output) if output.exit_code == 0 => {
+                pb.finish_with_message(format!("{label} done"));
+            }
+            Ok(output) => {
+                pb.finish_with_message(format!("{label} (exit code {})", output.exit_code));
+            }
+            Err(_) => {
+                pb.finish_with_message(format!("{label} failed"));
+            }
+        }
+
+        result
     }
 }
 

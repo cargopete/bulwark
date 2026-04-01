@@ -325,7 +325,9 @@ async fn run_variant_analysis(
             allowed_tools: vec![],
         };
 
-        let _ = session.run().await;
+        let _ = session
+            .run_with_spinner(&format!("Checking {}...", finding.id))
+            .await;
 
         // Check for variant output
         if variant_file.exists() {

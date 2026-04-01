@@ -17,8 +17,8 @@ services:
       - claude-history:/home/auditor/.claude
       # Mount config for easy editing without rebuild
       - ./bulwark.toml:/home/auditor/bulwark.toml:ro
-      # Optional: mount host Claude auth for licensed users (uncomment below)
-      # - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
+      # Mount host Claude auth for licensed users
+      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
     stdin_open: true
     tty: true
     # Resource requirements for multi-agent pipeline

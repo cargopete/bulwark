@@ -267,10 +267,7 @@ async fn generate_invariant_tests(
         ],
     };
 
-    match session.run().await {
-        Ok(output) => eprintln!("  Claude exited with code {}", output.exit_code),
-        Err(e) => eprintln!("  Claude session error: {e}"),
-    }
+    let _ = session.run_with_spinner("Generating invariant tests...").await;
     count_sol_files(invariant_dir)
 }
 

@@ -334,7 +334,7 @@ async fn generate_symbolic_tests(
         ],
     };
 
-    let _ = session.run().await;
+    let _ = session.run_with_spinner("Generating symbolic tests...").await;
     count_sol_files(formal_dir)
 }
 
