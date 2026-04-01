@@ -89,6 +89,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let loop_str = loop_bound.to_string();
         let total_timeout_str = (solver_timeout + 60).to_string();
 
+        // Read the forge out dir from foundry.toml (may differ from default "out")
+        let forge_out_dir = read_foundry_out_dir(&build_dir);
+
         for prop in &properties {
             let prop_num = prop.strip_prefix("P-").unwrap_or(prop);
             let check_func = format!("check_P{prop_num}");
@@ -120,6 +123,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                     &solver_str,
                     "--solver-timeout-branching",
                     &solver_str,
+                    "--forge-build-out",
+                    &forge_out_dir,
                     "-vvv",
                 ],
                 &build_dir,
@@ -399,4 +404,23 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+/// Read `out = '...'` from foundry.toml, defaulting to "out" if not found.
+fn read_foundry_out_dir(build_dir: &Path) -> String {
+    let toml_path = build_dir.join("foundry.toml");
+    if let Ok(content) = std::fs::read_to_string(toml_path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("out") {
+                if let Some(val) = trimmed.splitn(2, '=').nth(1) {
+                    let dir = val.trim().trim_matches('\'').trim_matches('"').to_string();
+                    if !dir.is_empty() {
+                        return dir;
+                    }
+                }
+            }
+        }
+    }
+    "out".to_string()
 }

@@ -23,7 +23,6 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     let forge_bin = ctx.config.resolve_tool("forge")?;
     let fuzz_runs = ctx.config.passes.fuzzing.fuzz_runs;
-    let invariant_depth = ctx.config.passes.fuzzing.invariant_depth;
 
     // ── Step 1: Generate invariant tests ─────────────────────────────
     let tests_generated = generate_invariant_tests(ctx, &invariant_dir, &logs_dir).await;
@@ -50,7 +49,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&invariant_dir, &forge_test_dir)?;
 
-        let invariant_count = count_invariant_functions(&forge_test_dir);
+        let invariant_count = count_invariant_functions(&forge_test_dir) + count_invariant_functions(&build_dir.join("test"));
         eprintln!(
             "  Found {invariant_count} invariant_ function(s) in test/invariant/"
         );
@@ -72,21 +71,18 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     if tests_exist {
         eprintln!(
-            "  Running Foundry invariant tests (fuzz-runs={fuzz_runs}, depth={invariant_depth})..."
+            "  Running Foundry invariant tests (fuzz-runs={fuzz_runs})..."
         );
 
         let fuzz_runs_str = fuzz_runs.to_string();
-        let depth_str = invariant_depth.to_string();
         let output = crate::tools::run_command(
             forge_bin.to_str().unwrap_or("forge"),
             &[
                 "test",
-                "--match-path",
-                "test/invariant",
+                "--match-test",
+                "invariant_",
                 "--fuzz-runs",
                 &fuzz_runs_str,
-                "--invariant-depth",
-                &depth_str,
                 "-vvv",
             ],
             &build_dir,
