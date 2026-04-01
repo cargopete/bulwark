@@ -14,6 +14,12 @@ echo "║  Multi-pass · Multi-agent · PoC-gated              ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
+# ── Inject host Claude credentials if mounted ─────────────────────────
+if [ -f "/home/auditor/.claude-host-creds/credentials.json" ]; then
+    cp /home/auditor/.claude-host-creds/credentials.json /home/auditor/.claude/.credentials.json
+    echo "✓  Claude credentials injected from host."
+fi
+
 # ── Check Claude Code auth ────────────────────────────────────────────
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     # Check if user has an existing Claude Code login (Max/Team/Enterprise)

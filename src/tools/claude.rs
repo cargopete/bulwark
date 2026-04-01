@@ -16,6 +16,10 @@ pub struct ClaudeSession {
     /// Tools the subprocess is allowed to use (passed as `--allowedTools`).
     /// Empty means no explicit restriction.
     pub allowed_tools: Vec<String>,
+    /// Hard wall-clock timeout for the subprocess. If set, the command is
+    /// wrapped with the system `timeout` utility and killed after this many
+    /// minutes. Exit code 124 means timeout was hit.
+    pub timeout_minutes: Option<u32>,
 }
 
 /// Result of a completed Claude session.
@@ -27,7 +31,16 @@ pub struct ClaudeOutput {
 impl ClaudeSession {
     /// Run the Claude session, writing stdout+stderr to the log file.
     pub async fn run(&self) -> Result<ClaudeOutput> {
-        let mut cmd = Command::new(&self.claude_bin);
+        // If a timeout is configured, wrap with system `timeout` utility so the
+        // subprocess is hard-killed after the wall-clock limit.
+        let mut cmd = if let Some(mins) = self.timeout_minutes {
+            let mut c = Command::new("timeout");
+            c.arg(format!("{}m", mins)).arg(&self.claude_bin);
+            c
+        } else {
+            Command::new(&self.claude_bin)
+        };
+
         cmd.arg("-p")
             .arg(&self.prompt)
             .arg("--max-turns")
@@ -83,6 +96,9 @@ impl ClaudeSession {
         match &result {
             Ok(output) if output.exit_code == 0 => {
                 pb.finish_with_message(format!("{label} done"));
+            }
+            Ok(output) if output.exit_code == 124 => {
+                pb.finish_with_message(format!("{label} TIMED OUT"));
             }
             Ok(output) => {
                 pb.finish_with_message(format!("{label} (exit code {})", output.exit_code));

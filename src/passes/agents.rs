@@ -211,6 +211,7 @@ async fn run_single_agent(
         log_file: log_file.clone(),
         model: Some(ctx.config.model.clone()),
         allowed_tools: vec![],
+        timeout_minutes: None, // Pass 2 uses its own tokio::time::timeout wrapper
     };
 
     let result = session.run().await?;
@@ -323,6 +324,7 @@ async fn run_variant_analysis(
             log_file,
             model: Some(ctx.config.model.clone()),
             allowed_tools: vec![],
+            timeout_minutes: Some(20),
         };
 
         let _ = session

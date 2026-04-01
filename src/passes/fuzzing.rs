@@ -265,6 +265,7 @@ async fn generate_invariant_tests(
             "Read".into(), "Write".into(), "Edit".into(),
             "Glob".into(), "Grep".into(), "Bash".into(),
         ],
+        timeout_minutes: Some(60),
     };
 
     let _ = session.run_with_spinner("Generating invariant tests...").await;

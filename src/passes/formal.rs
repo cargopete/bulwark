@@ -332,6 +332,7 @@ async fn generate_symbolic_tests(
             "Read".into(), "Write".into(), "Edit".into(),
             "Glob".into(), "Grep".into(), "Bash".into(),
         ],
+        timeout_minutes: Some(60),
     };
 
     let _ = session.run_with_spinner("Generating symbolic tests...").await;

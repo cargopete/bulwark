@@ -710,6 +710,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         log_file: log_file.clone(),
         model: Some(ctx.config.model.clone()),
         allowed_tools: vec![],
+        timeout_minutes: Some(30),
     };
 
     let _ = session.run().await?;

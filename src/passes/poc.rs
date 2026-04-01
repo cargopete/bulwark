@@ -222,6 +222,7 @@ async fn generate_and_validate_poc(
             log_file: log_file.to_path_buf(),
             model: Some(ctx.config.model.clone()),
             allowed_tools: vec![],
+            timeout_minutes: Some(45),
         };
 
         let _ = session.run_with_spinner("Generating PoC...").await;
@@ -566,6 +567,7 @@ async fn run_fp_check_filter(
             log_file: log_file.clone(),
             model: Some(ctx.config.model.clone()),
             allowed_tools: vec![],
+            timeout_minutes: Some(15),
         };
 
         let result = session

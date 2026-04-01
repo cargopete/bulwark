@@ -13,12 +13,10 @@ services:
     volumes:
       # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
-      # Persist Claude auth and conversation history
-      - claude-history:/home/auditor/.claude
       # Mount config for easy editing without rebuild
       - ./bulwark.toml:/home/auditor/bulwark.toml:ro
-      # Mount host Claude auth for licensed users
-      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude/.credentials.json:ro
+      # Mount host Claude credentials (login auth only — not the whole .claude dir)
+      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json:ro
     stdin_open: true
     tty: true
     # Resource requirements for multi-agent pipeline
@@ -30,4 +28,3 @@ services:
 
 volumes:
   audit-outputs:
-  claude-history:
