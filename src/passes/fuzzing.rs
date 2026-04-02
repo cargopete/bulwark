@@ -55,7 +55,20 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
 
         eprintln!("  Compiling invariant tests...");
+        // First attempt — may fail due to missing remappings
         let build_result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
+        let build_result = if !build_result.success {
+            // Patch any unresolved remappings detected in the build errors, then retry
+            let patched = patch_missing_remappings(&build_dir, &build_result.stderr);
+            if patched > 0 {
+                eprintln!("  Added {patched} missing remapping(s) — recompiling...");
+                crate::tools::forge::build(&forge_bin, &build_dir).await?
+            } else {
+                build_result
+            }
+        } else {
+            build_result
+        };
         if build_result.success {
             eprintln!("  {} Invariant tests compile", style("✓").green());
         } else {
@@ -317,6 +330,52 @@ fn count_invariant_functions(dir: &Path) -> usize {
         }
     }
     count
+}
+
+/// Parse forge build errors for "Source X not found", try to resolve X to a
+/// local directory, and append the missing remapping to remappings.txt.
+/// Returns the number of remappings patched.
+pub fn patch_missing_remappings(build_dir: &Path, stderr: &str) -> usize {
+    let remappings_path = build_dir.join("remappings.txt");
+    let existing = std::fs::read_to_string(&remappings_path).unwrap_or_default();
+    let mut added = 0;
+
+    for line in stderr.lines() {
+        // Match lines like: Source "foo/bar/Baz.sol" not found
+        if let Some(rest) = line.trim().strip_prefix("Source \"") {
+            if let Some(path_str) = rest.split('"').next() {
+                // Extract the remapping prefix (everything up to and including the first '/')
+                if let Some(slash) = path_str.find('/') {
+                    let prefix = &path_str[..slash];
+                    let suffix = &path_str[slash + 1..]; // e.g. "unit/staking/HorizonStaking.t.sol"
+
+                    // Skip if already remapped
+                    if existing.lines().any(|l| l.starts_with(&format!("{prefix}/"))) {
+                        continue;
+                    }
+
+                    // Try to find the file under common local directories
+                    let candidates = ["test", "contracts", "src", "lib"];
+                    for candidate in candidates {
+                        let full = build_dir.join(candidate).join(suffix);
+                        if full.exists() {
+                            let mapping = format!("{prefix}/={candidate}/\n");
+                            if let Ok(mut f) = std::fs::OpenOptions::new()
+                                .append(true)
+                                .open(&remappings_path)
+                            {
+                                use std::io::Write;
+                                let _ = f.write_all(mapping.as_bytes());
+                                added += 1;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    added
 }
 
 fn parse_foundry_failure(line: &str, idx: usize) -> Option<Value> {

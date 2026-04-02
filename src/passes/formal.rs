@@ -55,6 +55,17 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
         let result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
+        let result = if !result.success {
+            let patched = crate::passes::fuzzing::patch_missing_remappings(&build_dir, &result.stderr);
+            if patched > 0 {
+                eprintln!("  Added {patched} missing remapping(s) — recompiling...");
+                crate::tools::forge::build(&forge_bin, &build_dir).await?
+            } else {
+                result
+            }
+        } else {
+            result
+        };
         if result.success {
             eprintln!("  {} Symbolic tests compile", style("✓").green());
         } else {
