@@ -341,9 +341,12 @@ pub fn patch_missing_remappings(build_dir: &Path, stderr: &str) -> usize {
     let mut added = 0;
 
     for line in stderr.lines() {
-        // Match lines like: Source "foo/bar/Baz.sol" not found
-        if let Some(rest) = line.trim().strip_prefix("Source \"") {
-            if let Some(path_str) = rest.split('"').next() {
+        // Match lines like: Error (6275): Source "foo/bar/Baz.sol" not found
+        let trimmed = line.trim();
+        let source_pos = trimmed.find("Source \"");
+        if let Some(pos) = source_pos {
+            let after = &trimmed[pos + 8..]; // skip `Source "`
+            if let Some(path_str) = after.split('"').next() {
                 // Extract the remapping prefix (everything up to and including the first '/')
                 if let Some(slash) = path_str.find('/') {
                     let prefix = &path_str[..slash];
