@@ -229,7 +229,9 @@ async fn run_single_agent(
     let findings_count = if output_file.exists() {
         match std::fs::read_to_string(&output_file) {
             Ok(content) => match serde_json::from_str::<Vec<serde_json::Value>>(&content) {
-                Ok(arr) => arr.len(),
+                // Count only items that look like findings (have a severity field),
+                // not property verification status objects
+                Ok(arr) => arr.iter().filter(|v| v.get("severity").is_some()).count(),
                 Err(_) => {
                     // Invalid JSON — try extraction from log
                     extract_and_save(&log_file, &output_file)?

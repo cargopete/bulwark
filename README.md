@@ -3,9 +3,9 @@
 Multi-pass, multi-agent smart contract audit pipeline.
 Rust CLI + Docker container with Slither, Forge, Halmos, Claude Code, and 70 AI audit skills.
 
-> **Status**: Full 6-pass pipeline runs end-to-end (33 min on Graph Protocol contracts).
-> Pass 1 (Recon), Pass 2 (Agents), Pass 3 (PoC Gate), and Pass 6 (Review) fully operational.
-> Passes 4 & 5 use Sonnet for test generation quality — compilation still needs tuning.
+> **Status**: Full 6-pass pipeline runs end-to-end (~84 min on Graph Protocol contracts).
+> All 6 passes operational. Pass 4 finds real invariant violations. Pass 5 verifies properties
+> with Halmos. Pass 3 PoC compilation succeeds; test assertion quality is a work-in-progress.
 > See [ROADMAP.md](ROADMAP.md) for full status.
 
 ## Quick Start
@@ -106,14 +106,16 @@ For each finding from Pass 2:
 
 ### Pass 4: Fuzzing Campaign
 
-Claude (Sonnet) generates Foundry invariant tests from PROPERTIES.md. Tests are copied
-into the forge project and run with `forge test --match-path test/invariant/*`.
+Claude (Sonnet) generates Foundry invariant tests from PROPERTIES.md. Tests are placed
+alongside the project's existing invariant tests and run with `forge test --match-test invariant_`.
+Missing Forge remappings are auto-detected and patched before compilation.
 Medusa and Echidna integration coded but not yet installed.
 
 ### Pass 5: Formal Verification
 
 Claude (Sonnet) generates symbolic tests for critical properties. Halmos runs bounded
 model checking on each property, producing VERIFIED/VIOLATED/TIMEOUT results.
+The `--forge-build-out` flag is read from `foundry.toml` so non-default output directories work.
 
 ### Pass 6: Adversarial Review
 

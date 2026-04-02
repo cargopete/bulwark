@@ -29,6 +29,16 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         eprintln!("    Building {pkg_name}...");
 
         let result = forge::build(&forge_bin, &pkg_path).await?;
+        let result = if !result.success {
+            let patched = crate::passes::fuzzing::patch_missing_remappings(&pkg_path, &result.stderr);
+            if patched > 0 {
+                forge::build(&forge_bin, &pkg_path).await?
+            } else {
+                result
+            }
+        } else {
+            result
+        };
         if result.success {
             eprintln!("    {} {pkg_name} compiled", style("✓").green());
             if compiler_version == "unknown" {
