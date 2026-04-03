@@ -25,6 +25,16 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let fuzz_runs = ctx.config.passes.fuzzing.fuzz_runs;
 
     // ── Step 1: Generate invariant tests ─────────────────────────────
+    // Clear stale files from previous runs before generating fresh ones.
+    // This prevents partial/timed-out files from a previous run from contaminating the build.
+    if invariant_dir.exists() {
+        for entry in std::fs::read_dir(&invariant_dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            if p.extension().is_some_and(|e| e == "sol") {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
     let tests_generated = generate_invariant_tests(ctx, &invariant_dir, &logs_dir).await;
     if tests_generated == 0 {
         eprintln!(
@@ -279,7 +289,7 @@ async fn generate_invariant_tests(
             "Read".into(), "Write".into(), "Edit".into(),
             "Glob".into(), "Grep".into(), "Bash".into(),
         ],
-        timeout_minutes: Some(60),
+        timeout_minutes: Some(30),
     };
 
     let _ = session.run_with_spinner("Generating invariant tests...").await;
