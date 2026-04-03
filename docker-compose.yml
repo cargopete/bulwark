@@ -17,6 +17,8 @@ services:
       - ./bulwark.toml:/home/auditor/bulwark.toml:ro
       # Mount host Claude credentials (login auth only — not the whole .claude dir)
       - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json:ro
+      # Reports land here on the host after each run
+      - ./reports:/home/auditor/reports
     stdin_open: true
     tty: true
     # Resource requirements for multi-agent pipeline

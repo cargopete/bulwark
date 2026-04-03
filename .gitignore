@@ -1,5 +1,7 @@
 .env
 audit-workspace/
+reports/*.md
+reports/*.json
 *.tmp
 
 

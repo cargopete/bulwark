@@ -179,7 +179,42 @@ impl Orchestrator {
         }
 
         self.print_summary(&results, pipeline_start.elapsed().as_secs());
+        self.export_reports_to_host();
         Ok(results)
+    }
+
+    /// Copy final reports to the host-mounted reports directory if it exists.
+    fn export_reports_to_host(&self) {
+        let reports_dir = std::path::Path::new("/home/auditor/reports");
+        if !reports_dir.exists() {
+            return;
+        }
+
+        let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let md_src = self.ctx.workspace.final_report_md();
+        let json_src = self.ctx.workspace.final_report_json();
+
+        let mut copied = vec![];
+
+        if md_src.exists() {
+            let dest = reports_dir.join(format!("audit-report-{timestamp}.md"));
+            if std::fs::copy(&md_src, &dest).is_ok() {
+                copied.push(dest);
+            }
+        }
+        if json_src.exists() {
+            let dest = reports_dir.join(format!("audit-report-{timestamp}.json"));
+            if std::fs::copy(&json_src, &dest).is_ok() {
+                copied.push(dest);
+            }
+        }
+
+        if !copied.is_empty() {
+            eprintln!("\n  {} Reports exported to host:", style("✓").green());
+            for path in &copied {
+                eprintln!("    {}", path.display());
+            }
+        }
     }
 
     async fn execute_pass(&self, pass: PassNumber) -> Result<String> {
