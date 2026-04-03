@@ -138,13 +138,17 @@ Generate invariant tests for these properties (read PROPERTIES.md for full descr
 
 Write invariant test files to `audit-workspace/fuzzing/invariant-tests/`.
 
-Create separate files for each domain:
-- `InvariantStaking.t.sol` — P-1, P-4
-- `InvariantDelegation.t.sol` — P-5, P-6, P-7, P-9
-- `InvariantSlashing.t.sol` — P-10, P-11, P-13
-- `InvariantPayments.t.sol` — P-14, P-15
-- `InvariantOperator.t.sol` — P-19, P-20
-- `Handler.sol` — shared handler contract with all fuzzable actions
+**IMPORTANT**: The project already has its own `test/invariant/Handler.sol`, `InvariantStaking.t.sol`,
+etc. Do NOT use those names — your files will be placed in a separate `test/bulwark/` directory
+and must have unique names to avoid conflicts.
+
+Create separate files for each domain using `Bulwark` prefix:
+- `BulwarkInvariantStaking.t.sol` — P-1, P-4
+- `BulwarkInvariantDelegation.t.sol` — P-5, P-6, P-7, P-9
+- `BulwarkInvariantSlashing.t.sol` — P-10, P-11, P-13
+- `BulwarkInvariantPayments.t.sol` — P-14, P-15
+- `BulwarkInvariantOperator.t.sol` — P-19, P-20
+- `BulwarkHandler.sol` — shared handler contract (NOT named Handler.sol)
 
 Use `deal()` for token setup, `vm.prank()` for callers.
 If a contract interface is unclear, read the source first — do not guess function signatures.

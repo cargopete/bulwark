@@ -53,8 +53,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     let tests_exist = count_sol_files(&invariant_dir) > 0;
 
-    // Copy generated tests into the forge project so forge can find them
-    let forge_test_dir = build_dir.join("test/invariant");
+    // Copy generated tests into a SEPARATE directory to avoid overwriting the
+    // project's own test/invariant/ files (e.g. their Handler.sol).
+    let forge_test_dir = build_dir.join("test/bulwark");
     if tests_exist {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&invariant_dir, &forge_test_dir)?;

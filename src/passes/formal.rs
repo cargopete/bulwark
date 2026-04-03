@@ -167,11 +167,23 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                 || combined.contains("passed")
                 || combined.contains("0 counterexample")
             {
-                eprintln!(
-                    "    {} {prop}: VERIFIED (bounded, loop={loop_bound}) in {duration}s",
-                    style("✓").green()
-                );
-                "VERIFIED"
+                // If Halmos finishes in under 5s it likely ran 0 tests (no matching functions).
+                // This happens when generated tests use bare names like check_P10() instead of
+                // check_P10_something() — our --function check_P10_ filter won't match.
+                if duration < 5 {
+                    eprintln!(
+                        "    {} {prop}: VACUOUS — no matching test functions found (check naming: need check_P{}_<desc> suffix)",
+                        style("?").yellow(),
+                        prop.strip_prefix("P-").unwrap_or(prop)
+                    );
+                    "VACUOUS"
+                } else {
+                    eprintln!(
+                        "    {} {prop}: VERIFIED (bounded, loop={loop_bound}) in {duration}s",
+                        style("✓").green()
+                    );
+                    "VERIFIED"
+                }
             } else if combined.contains("forge build") && combined_lower.contains("error") {
                 eprintln!(
                     "    {} {prop}: BUILD ERROR — symbolic tests failed to compile",
