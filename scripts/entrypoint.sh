@@ -101,12 +101,32 @@ fi
 echo "→ Installing AI audit skills..."
 /home/auditor/scripts/install-skills.sh
 
+# ── Patch missing remappings ─────────────────────────────────────────
+# horizon-test/ is used by invariant tests but not in remappings.txt by default
+patch_remapping() {
+    local pkg_dir="$1"
+    local remap_file="$pkg_dir/remappings.txt"
+    if [ ! -f "$remap_file" ]; then return; fi
+    if ! grep -q "^horizon-test/" "$remap_file" 2>/dev/null; then
+        # Find the test directory
+        local test_dir
+        test_dir=$(find "$pkg_dir" -maxdepth 3 -type d -name "test" 2>/dev/null | head -1)
+        if [ -n "$test_dir" ]; then
+            local rel
+            rel=$(realpath --relative-to="$pkg_dir" "$test_dir")
+            echo "horizon-test/=${rel}/" >> "$remap_file"
+        fi
+    fi
+}
+
 # ── Compile contracts ────────────────────────────────────────────────
 echo "→ Compiling contracts..."
 if [ -d "packages/horizon" ]; then
+    patch_remapping "packages/horizon"
     (cd packages/horizon && forge build 2>/dev/null) && echo "  ✓ Horizon compiled" || echo "  ✗ Horizon build failed (may need manual setup)"
 fi
 if [ -d "packages/subgraph-service" ]; then
+    patch_remapping "packages/subgraph-service"
     (cd packages/subgraph-service && forge build 2>/dev/null) && echo "  ✓ SubgraphService compiled" || echo "  ✗ SubgraphService build failed (may need manual setup)"
 fi
 

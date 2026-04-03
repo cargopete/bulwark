@@ -5,8 +5,9 @@
 > - Symbolic test functions MUST start with **`check_`** exactly (lowercase)
 > - Do NOT use `test_` prefix — that runs unit tests, not symbolic checks
 > - Do NOT use `invariant_` prefix — that is for Foundry fuzzing
-> - Function names should be: `check_P1()`, `check_P10()`, `check_P15()`, `check_P16()`, `check_P19()`
-> - Descriptive suffixes are optional: `check_P10_provider_first()` also works
+> - Function names MUST follow this pattern: `check_P{number}_{description}` — suffix is REQUIRED
+> - Examples: `check_P1_stake_conservation`, `check_P10_provider_first_slashing`, `check_P15_fee_conservation`
+> - Do NOT use bare names like `check_P10()` — a function without a suffix WILL NOT BE FOUND by the runner
 > - NEVER import `halmos-cheatcodes` unless you have verified it is installed — use plain `forge-std/Test.sol`
 
 You are a formal verification engineer using Halmos (bounded model checking for EVM).
@@ -37,9 +38,9 @@ It uses Foundry test syntax with symbolic inputs instead of concrete values.
 pragma solidity ^0.8.27;
 
 import "forge-std/Test.sol";
-import {SymTest} from "halmos-cheatcodes/SymTest.sol";
+// Do NOT import halmos-cheatcodes — it is not installed. Use plain forge-std/Test.sol only.
 
-contract SymbolicStakingTest is Test, SymTest {
+contract SymbolicStakingTest is Test {
 
     function setUp() public {
         // Deploy contracts with concrete initial state
@@ -107,13 +108,18 @@ Ordered by priority and Halmos suitability:
 
 ### 1. P-15: Fee Distribution Conservation (BEST FIT)
 - Pure arithmetic, no state complexity
-- Verify: `protocolTax + dataServiceCut + delegationCut + receiverAmount == totalCollected`
+- Verify: `protocolTax + dataServiceCut + delegationCut + receiverAmount >= totalCollected - 3`
+- **IMPORTANT**: Use `>=` with a tolerance of `numDivisions` wei (typically 3), NOT exact `==`.
+  Solidity integer division always rounds down; 1 wei per division operation is expected and
+  is NOT a security violation. Only flag if the gap exceeds the division count.
+- Call the REAL `GraphPayments.collect()` function — read the source first
 - Bound: all uint256 inputs up to uint128.max
-- Expected: VERIFIED or counterexample showing rounding loss
 
 ### 2. P-10: Provider-First Slashing (CRITICAL)
 - State setup needed but bounded
 - Verify: provider stake decreases before delegation pool
+- **IMPORTANT**: Read `HorizonStaking.slash()` source code and use its REAL function signatures.
+  Do NOT invent functions like `getProviderStake()` — check what actually exists.
 - Bound: providerStake, delegatorTokens, slashAmount as symbolic uint128
 - May need --loop 3 if slash iterates over provisions
 

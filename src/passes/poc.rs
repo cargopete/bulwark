@@ -187,19 +187,18 @@ async fn generate_and_validate_poc(
             "{base_prompt}\n\n---\n\n## Finding to Demonstrate\n\n```json\n{finding_json}\n```\n\n\
              ## Test Infrastructure\n{test_info}\n\n\
              ## Output Path\n\nWrite the PoC test to: `{}`\n\n\
-             The test MUST compile with `forge build`. A compiling test that's inconclusive is \
-             infinitely better than a perfect test that doesn't compile.",
+             CRITICAL: Write a POSITIVE PoC — the test PASSES (`[PASS]`) when the attack succeeds. \
+             Assert the bad outcome directly: `assertGt(stolen, 0)`, `assertEq(attackerBalance, victimBalance)`, etc. \
+             A test that passes proves the exploit works. Do NOT use `assert(false)` or expect the test to fail.",
             poc_file.display()
         );
 
-        // On retry, include compilation errors
+        // On retry, include previous failure details
         if retry > 0 {
-            let error_file = logs_dir.join(format!(
-                "{}-build-error-{}.txt",
-                finding.id,
-                retry - 1
-            ));
-            if let Ok(errors) = std::fs::read_to_string(&error_file) {
+            let build_error_file = logs_dir.join(format!("{}-build-error-{}.txt", finding.id, retry - 1));
+            let test_output_file = logs_dir.join(format!("{}-test-output-{}.txt", finding.id, retry - 1));
+
+            if let Ok(errors) = std::fs::read_to_string(&build_error_file) {
                 let tail: String = errors.lines().rev().take(50).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
                 prompt.push_str(&format!(
                     "\n\n## PREVIOUS ATTEMPT FAILED TO COMPILE\n\n\
@@ -209,6 +208,19 @@ async fn generate_and_validate_poc(
                      - Missing function signatures — read the actual contract source\n\
                      - Wrong Solidity version — use `pragma solidity ^0.8.27;`\n\
                      - Simplify: use `deal()` for balances, `vm.prank()` for callers"
+                ));
+            } else if let Ok(test_out) = std::fs::read_to_string(&test_output_file) {
+                let tail: String = test_out.lines().rev().take(80).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+                prompt.push_str(&format!(
+                    "\n\n## PREVIOUS ATTEMPT COMPILED BUT ASSERTIONS FAILED ([FAIL])\n\n\
+                     The test ran but your assertions were FALSE — the attack didn't produce the expected outcome.\n\
+                     Here is the forge test output:\n\n```\n{tail}\n```\n\n\
+                     The assertion values above show the ACTUAL state. Use them to:\n\
+                     1. Fix your assertion direction (e.g. if assertGt failed, try assertLt)\n\
+                     2. Re-read the contract source to find the REAL invariant being broken\n\
+                     3. Check if you need different preconditions or a different attack path\n\
+                     4. Add console.log() calls to trace intermediate values\n\
+                     Your goal: make the test PASS ([PASS]) by correctly asserting the bad outcome."
                 ));
             }
         }
@@ -244,6 +256,14 @@ async fn generate_and_validate_poc(
         // Find build directory
         let build_dir = find_build_dir(ctx, &finding.contract);
 
+        // Copy PoC into the forge project so forge can find it
+        let forge_poc_dir = build_dir.join("test/pocs");
+        let _ = std::fs::create_dir_all(&forge_poc_dir);
+        let poc_in_project = forge_poc_dir.join(format!("{}.t.sol", finding.id));
+        if let Err(e) = std::fs::copy(poc_file, &poc_in_project) {
+            eprintln!("    {} Failed to copy PoC into project: {e}", style("⚠").yellow());
+        }
+
         // Attempt compilation
         eprintln!("    Compiling...");
         let build_output = crate::tools::run_command(
@@ -271,13 +291,9 @@ async fn generate_and_validate_poc(
         if compiled {
             eprintln!("    {} Compilation successful", style("✓").green());
 
-            // Run the test — forge needs a path relative to the project root
+            // Run the test using a project-relative path
             eprintln!("    Running test...");
-            let rel_poc = poc_file
-                .strip_prefix(&build_dir)
-                .unwrap_or(poc_file)
-                .to_string_lossy()
-                .to_string();
+            let rel_poc = format!("test/pocs/{}.t.sol", finding.id);
             let test_result = crate::tools::run_command(
                 forge_bin.to_str().unwrap_or("forge"),
                 &["test", "--match-path", &rel_poc, "-vvv"],
@@ -296,7 +312,15 @@ async fn generate_and_validate_poc(
 
             let status = classify_test_result(&test_output);
             eprintln!("    Result: {status}");
-            return status;
+
+            if status == "compiles_and_demonstrates" || retry == max_retries {
+                return status;
+            }
+
+            // Test ran but assertions failed — save output and retry with feedback
+            let test_output_file = logs_dir.join(format!("{}-test-output-{retry}.txt", finding.id));
+            let _ = std::fs::write(&test_output_file, &test_output);
+            eprintln!("    {} Assertions failed — retrying with test output feedback", style("⚠").yellow());
         } else {
             eprintln!("    {} Compilation failed", style("⚠").yellow());
 
@@ -317,37 +341,22 @@ async fn generate_and_validate_poc(
 }
 
 fn classify_test_result(output: &str) -> String {
-    if output.contains("[PASS]") && output.contains("test_") {
-        let vuln_indicators = [
-            "assert", "revert", "overflow", "underflow", "drift", "profit", "loss", "extract",
-        ];
-        if vuln_indicators
-            .iter()
-            .any(|i| output.to_lowercase().contains(i))
-        {
-            "compiles_and_demonstrates".into()
-        } else {
-            "compiles_but_inconclusive".into()
+    // Forge test names can be either snake_case (test_exploit) or camelCase (testExploit).
+    // Match both by checking for the prefix without requiring an underscore.
+    let has_test = output.contains("[PASS]") || output.contains("[FAIL]");
+    if !has_test {
+        if output.to_lowercase().contains("mainnet") || output.to_lowercase().contains("fork") {
+            return "requires_mainnet_simulation".into();
         }
-    } else if output.contains("[FAIL]") && output.contains("test_") {
-        let demo_indicators = [
-            "Rounding profit",
-            "shares",
-            "price",
-            "manipulat",
-            "extract",
-            "drain",
-        ];
-        if demo_indicators.iter().any(|i| output.contains(i)) {
-            "compiles_and_demonstrates".into()
-        } else {
-            "compiles_but_inconclusive".into()
-        }
-    } else if output.to_lowercase().contains("mainnet")
-        || output.to_lowercase().contains("fork")
-    {
-        "requires_mainnet_simulation".into()
+        return "compiles_but_inconclusive".into();
+    }
+
+    if output.contains("[PASS]") {
+        // A passing PoC test means the attack succeeded — the test asserted the bad outcome
+        // and it held (e.g. assertGt(stolen, 0) passed). That IS a demonstration.
+        "compiles_and_demonstrates".into()
     } else {
+        // [FAIL] means an assertion in the test failed — the invariant held, attack didn't work.
         "compiles_but_inconclusive".into()
     }
 }

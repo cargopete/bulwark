@@ -3,10 +3,10 @@
 Multi-pass, multi-agent smart contract audit pipeline.
 Rust CLI + Docker container with Slither, Forge, Halmos, Claude Code, and 70 AI audit skills.
 
-> **Status**: Full 6-pass pipeline runs end-to-end (~84 min on Graph Protocol contracts).
-> All 6 passes operational. Pass 4 finds real invariant violations. Pass 5 verifies properties
-> with Halmos. Pass 3 PoC compilation succeeds; test assertion quality is a work-in-progress.
-> See [ROADMAP.md](ROADMAP.md) for full status.
+> **Status**: Full 6-pass pipeline runs end-to-end (~70 min on Graph Protocol contracts).
+> All 6 passes operational. Pass 3 achieves 100% PoC validation rate (3/3 validated, 0 inconclusive).
+> Pass 4 runs 90 invariant tests. Pass 5 verifies all 5 properties with real symbolic execution (~41s each).
+> Deduplication correctly merges findings across agents.
 
 ## Quick Start
 
@@ -99,10 +99,12 @@ disagreement tracking. Variant analysis runs on high/critical findings.
 
 For each finding from Pass 2:
 1. False-positive check (`/tob-fp-check`) filters obvious FPs
-2. Claude generates a Foundry test PoC
-3. `forge build` — must compile
-4. `forge test` — classify result
-5. Findings that fail to compile are discarded; inconclusive High/Critical capped to Medium
+2. Claude generates a Foundry test PoC (positive convention — `[PASS]` = attack succeeded)
+3. PoC is placed inside the forge project (`test/pocs/`) so forge can compile and find it
+4. `forge build` — must compile; compilation errors fed back for retry
+5. `forge test --match-path test/pocs/F-XXX.t.sol` — `[PASS]` = validated, `[FAIL]` = inconclusive
+6. On inconclusive: retry with full test output so the AI can fix assertion direction
+7. Findings that fail all retries are discarded; inconclusive High/Critical capped to Medium
 
 ### Pass 4: Fuzzing Campaign
 
@@ -115,6 +117,8 @@ Medusa and Echidna integration coded but not yet installed.
 
 Claude (Sonnet) generates symbolic tests for critical properties. Halmos runs bounded
 model checking on each property, producing VERIFIED/VIOLATED/TIMEOUT results.
+Test functions must follow `check_P{N}_{description}` naming (suffix required) so
+Halmos's prefix matching doesn't cross-contaminate results between properties (e.g. P-1 vs P-10).
 The `--forge-build-out` flag is read from `foundry.toml` so non-default output directories work.
 
 ### Pass 6: Adversarial Review

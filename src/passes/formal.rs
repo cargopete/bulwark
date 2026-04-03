@@ -105,10 +105,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
         for prop in &properties {
             let prop_num = prop.strip_prefix("P-").unwrap_or(prop);
-            let check_func = format!("check_P{prop_num}");
+            // Bare name for searching file contents; underscore-suffixed for Halmos invocation
+            // so "check_P1_" doesn't prefix-match "check_P10_", "check_P15_", etc.
+            let check_func_bare = format!("check_P{prop_num}");
+            let check_func = format!("check_P{prop_num}_");
 
-            // Check if any test file contains this function
-            let has_test = find_function_in_dir(&formal_dir, &check_func);
+            // Check if any test file contains this function (match bare prefix)
+            let has_test = find_function_in_dir(&formal_dir, &check_func_bare);
             if !has_test {
                 eprintln!("    {prop}: no symbolic test found — skipping");
                 verification.insert(

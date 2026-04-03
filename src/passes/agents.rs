@@ -150,11 +150,13 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         );
     }
     eprintln!();
+    let total_from_agents: usize = agent_results.iter().map(|(_, c)| *c).sum();
+    let displayed_deduped = total_from_agents.saturating_sub(merge_result.findings.len());
     eprintln!(
         "  {} After merge: {} unique findings ({} duplicates removed)",
         style("✓").green(),
         merge_result.findings.len(),
-        merge_result.duplicates_removed
+        displayed_deduped
     );
 
     if merge_result.severity_disagreements > 0 {
