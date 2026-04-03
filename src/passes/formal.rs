@@ -42,6 +42,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
     }
 
+    // ── Step 1b: Enforce suffixed function naming ────────────────────
+    // The AI sometimes generates bare `check_P10()` instead of `check_P10_something()`.
+    // Halmos uses prefix matching so bare names match nothing when we pass --function check_P10_.
+    // Patch any bare names in-place before copying to the forge project.
+    patch_bare_check_names(&formal_dir);
+
     // ── Step 2: Compile ─────────────────────────────────────────────
     let build_dir = ctx.build_dir();
     let tests_exist = count_sol_files(&formal_dir) > 0;
@@ -107,11 +113,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let prop_num = prop.strip_prefix("P-").unwrap_or(prop);
             // Bare name for searching file contents; underscore-suffixed for Halmos invocation
             // so "check_P1_" doesn't prefix-match "check_P10_", "check_P15_", etc.
-            let check_func_bare = format!("check_P{prop_num}");
+            // Suffix is required: "check_P10_" matches "check_P10_something" but NOT bare "check_P10()"
+            // This prevents both vacuous VERIFIED results and cross-property prefix contamination.
             let check_func = format!("check_P{prop_num}_");
 
-            // Check if any test file contains this function (match bare prefix)
-            let has_test = find_function_in_dir(&formal_dir, &check_func_bare);
+            // Check if any test file contains a properly-suffixed function
+            let has_test = find_function_in_dir(&formal_dir, &check_func);
             if !has_test {
                 eprintln!("    {prop}: no symbolic test found — skipping");
                 verification.insert(
@@ -430,6 +437,53 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+/// Patch bare check_P{N}() function names to check_P{N}_verify() in all .sol files.
+/// The AI often generates bare names like `check_P10()` which Halmos's prefix filter
+/// `--function check_P10_` cannot match. Rename them in-place before compilation.
+fn patch_bare_check_names(dir: &Path) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e == "sol") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+
+        // Find `function check_P{digits}(` — bare name (no underscore after digits).
+        // We do this with a simple string scan rather than pulling in a regex dep.
+        let mut patched = String::with_capacity(content.len());
+        let mut rest = content.as_str();
+        let mut changed = false;
+
+        while let Some(pos) = rest.find("function check_P") {
+            patched.push_str(&rest[..pos + 16]); // up to and including "function check_P"
+            rest = &rest[pos + 16..];
+
+            // Consume digits
+            let digit_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let digits = &rest[..digit_end];
+            rest = &rest[digit_end..];
+
+            patched.push_str(digits);
+
+            // If next char is `(` it's a bare name — append `_verify`
+            if rest.starts_with('(') {
+                patched.push_str("_verify");
+                changed = true;
+            }
+            // (If it starts with `_` it already has a suffix — leave it)
+        }
+        patched.push_str(rest);
+
+        if changed {
+            let _ = std::fs::write(&path, &patched);
+        }
+    }
 }
 
 /// Read `out = '...'` from foundry.toml, defaulting to "out" if not found.
