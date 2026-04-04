@@ -174,10 +174,21 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                 || combined.contains("passed")
                 || combined.contains("0 counterexample")
             {
-                // If Halmos finishes in under 5s it likely ran 0 tests (no matching functions).
-                // This happens when generated tests use bare names like check_P10() instead of
-                // check_P10_something() — our --function check_P10_ filter won't match.
-                if duration < 5 {
+                // "0 passed; N failed" with errors means Halmos ran but all tests errored
+                // (e.g. "IndexError: pop from empty list" — contract too complex for Halmos).
+                // This is different from VACUOUS (no tests matched) or VERIFIED (tests passed).
+                let zero_passed_with_fails = combined.contains("0 passed")
+                    && (combined.contains("failed") || combined_lower.contains("error"));
+                // Under 5s with no real output = no matching functions (bare name issue)
+                let no_tests_ran = duration < 5 && !combined.contains("0 passed");
+
+                if zero_passed_with_fails {
+                    eprintln!(
+                        "    {} {prop}: ERROR — Halmos internal error (contract likely too complex), see halmos-{prop}.log",
+                        style("✗").red()
+                    );
+                    "ERROR"
+                } else if no_tests_ran {
                     eprintln!(
                         "    {} {prop}: VACUOUS — no matching test functions found (check naming: need check_P{}_<desc> suffix)",
                         style("?").yellow(),
