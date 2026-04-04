@@ -22,16 +22,23 @@ the configured bound — or finds a concrete counterexample.
 
 It uses Foundry test syntax with symbolic inputs instead of concrete values.
 
+## CRITICAL RULE: DO NOT DEPLOY REAL CONTRACTS
+
+> **⚠ Halmos will crash with `IndexError: pop from empty list` if you deploy real Graph contracts.**
+> Real contracts (HorizonStaking, GraphPayments, etc.) are too complex for Halmos's symbolic engine.
+> **Every check_ function must be SELF-CONTAINED — inline the math, do NOT call external contracts.**
+
 ## Rules
 
 1. Every test MUST compile with `forge build` first (Halmos uses Forge's compilation).
 2. Use `check_` prefix instead of `test_` — this tells Halmos to verify symbolically.
-3. Keep tests simple. Complex cross-contract paths will cause Z3 timeouts.
-4. Use `vm.assume()` to constrain symbolic inputs to valid ranges.
-5. Set explicit loop bounds with `--loop 5` or similar — unbounded loops won't terminate.
-6. If a property is too complex for Halmos, document why and mark it for fuzzing instead.
+3. **DO NOT deploy or call any real Graph contracts.** Inline the arithmetic yourself.
+4. `setUp()` must be empty or set only primitive constants. No contract deployment.
+5. Use `vm.assume()` to constrain symbolic inputs to valid ranges.
+6. Check functions receive symbolic values as function parameters — no `svm.createUint256()`.
+7. If a property requires contract state, model it with pure arithmetic — do NOT deploy a contract.
 
-## Halmos Test Structure
+## Halmos Test Structure — PURE ARITHMETIC ONLY
 
 ```solidity
 // SPDX-License-Identifier: MIT
@@ -39,103 +46,109 @@ pragma solidity ^0.8.27;
 
 import "forge-std/Test.sol";
 // Do NOT import halmos-cheatcodes — it is not installed. Use plain forge-std/Test.sol only.
+// Do NOT deploy any contracts in setUp() — Halmos cannot handle complex contract state.
 
-contract SymbolicStakingTest is Test {
+contract SymbolicPropertyTests is Test {
+    uint256 constant PPM_MAX = 1_000_000;
 
-    function setUp() public {
-        // Deploy contracts with concrete initial state
-    }
+    // NO setUp() needed — or keep it empty. DO NOT deploy contracts.
 
     // P-15: Fee distribution conservation
-    // Halmos verifies: for ALL valid inputs, fees sum to total
+    // Model the fee math inline — do NOT call GraphPayments.collect()
     function check_P15_fee_conservation(
         uint256 totalAmount,
-        uint256 protocolTaxRate,
-        uint256 dataServiceCut,
-        uint256 delegationCut
-    ) public {
-        // Constrain inputs to valid ranges
+        uint256 protocolTaxPPM,
+        uint256 dataServiceCutPPM,
+        uint256 delegationCutPPM
+    ) public pure {
         vm.assume(totalAmount > 0 && totalAmount < type(uint128).max);
-        vm.assume(protocolTaxRate <= 1e6);  // max 100% in PPM
-        vm.assume(dataServiceCut <= 1e6);
-        vm.assume(delegationCut <= 1e6);
+        vm.assume(protocolTaxPPM <= PPM_MAX);
+        vm.assume(dataServiceCutPPM <= PPM_MAX);
+        vm.assume(delegationCutPPM <= PPM_MAX);
+        vm.assume(protocolTaxPPM + dataServiceCutPPM + delegationCutPPM <= PPM_MAX);
 
-        // Execute the fee distribution
-        (uint256 tax, uint256 dsCut, uint256 delCut, uint256 receiver) =
-            graphPayments.calculateFees(totalAmount, protocolTaxRate, dataServiceCut, delegationCut);
+        // Inline the fee math (copy from GraphPayments.sol source)
+        uint256 tax = (totalAmount * protocolTaxPPM) / PPM_MAX;
+        uint256 remaining = totalAmount - tax;
+        uint256 dsCut = (remaining * dataServiceCutPPM) / PPM_MAX;
+        uint256 delCut = (remaining * delegationCutPPM) / PPM_MAX;
+        uint256 receiverAmount = remaining - dsCut - delCut;
 
-        // Property: exact conservation
-        assertEq(tax + dsCut + delCut + receiver, totalAmount, "P-15: fees not conserved");
+        // Property: total distributed == total collected (within rounding tolerance)
+        uint256 distributed = tax + dsCut + delCut + receiverAmount;
+        // 1 wei rounding loss per division is expected — allow up to 3 wei tolerance
+        assert(distributed >= totalAmount - 3 && distributed <= totalAmount);
     }
 
-    // P-10: Provider-first slashing
-    function check_P10_provider_first_slashing(
+    // P-10: Provider-first slashing — pure arithmetic model
+    // Do NOT deploy HorizonStaking. Model the slashing math directly.
+    function check_P10_provider_absorbs_first(
         uint256 providerStake,
         uint256 delegatorTokens,
         uint256 slashAmount
-    ) public {
-        vm.assume(providerStake > 0 && providerStake < type(uint128).max);
-        vm.assume(delegatorTokens > 0 && delegatorTokens < type(uint128).max);
-        vm.assume(slashAmount > 0 && slashAmount <= providerStake + delegatorTokens);
+    ) public pure {
+        vm.assume(providerStake < type(uint128).max);
+        vm.assume(delegatorTokens < type(uint128).max);
+        vm.assume(slashAmount > 0);
+        vm.assume(slashAmount <= providerStake + delegatorTokens);
 
-        // Setup state
-        // ... deploy and configure staking with these values ...
-
-        // Execute slash
-        staking.slash(sp, slashAmount, 0, address(0));
-
-        uint256 providerAfter = staking.getProviderStake(sp);
-        uint256 delegatorAfter = staking.getDelegationPoolTokens(sp, dataService);
-
-        // Property: provider absorbs first
+        // Model the slashing logic inline (mirrors HorizonStaking._slash logic)
+        uint256 providerAfter;
+        uint256 delegatorAfter;
         if (slashAmount <= providerStake) {
-            // If slash fits in provider stake, delegators untouched
-            assertEq(delegatorAfter, delegatorTokens, "P-10: delegators slashed when provider had enough");
-            assertEq(providerAfter, providerStake - slashAmount, "P-10: provider not slashed correctly");
+            providerAfter = providerStake - slashAmount;
+            delegatorAfter = delegatorTokens;
         } else {
-            // Provider fully slashed, remainder from delegators
-            assertEq(providerAfter, 0, "P-10: provider should be zero");
-            assertEq(delegatorAfter, delegatorTokens - (slashAmount - providerStake),
-                "P-10: delegator slash amount incorrect");
+            providerAfter = 0;
+            uint256 remainder = slashAmount - providerStake;
+            delegatorAfter = delegatorTokens > remainder ? delegatorTokens - remainder : 0;
         }
+
+        // P-10: provider stake decreases before delegator pool
+        if (slashAmount <= providerStake) {
+            assert(delegatorAfter == delegatorTokens); // delegators untouched
+        } else {
+            assert(providerAfter == 0); // provider fully drained first
+        }
+        // Total removed never exceeds slash amount
+        uint256 totalBefore = providerStake + delegatorTokens;
+        uint256 totalAfter = providerAfter + delegatorAfter;
+        assert(totalBefore - totalAfter <= slashAmount);
     }
 }
-```
 
-## Properties to Verify
+## Properties to Verify — INLINE MATH ONLY, NO CONTRACT DEPLOYMENT
+
+> For every property: read the relevant source, extract the arithmetic, inline it. Do NOT call the real contract.
 
 Ordered by priority and Halmos suitability:
 
-### 1. P-15: Fee Distribution Conservation (BEST FIT)
-- Pure arithmetic, no state complexity
-- Verify: `protocolTax + dataServiceCut + delegationCut + receiverAmount >= totalCollected - 3`
-- **IMPORTANT**: Use `>=` with a tolerance of `numDivisions` wei (typically 3), NOT exact `==`.
-  Solidity integer division always rounds down; 1 wei per division operation is expected and
-  is NOT a security violation. Only flag if the gap exceeds the division count.
-- Call the REAL `GraphPayments.collect()` function — read the source first
-- Bound: all uint256 inputs up to uint128.max
+### 1. P-15: Fee Distribution Conservation (BEST FIT — PURE MATH)
+- Read `GraphPayments.collect()` source, extract the fee calculation arithmetic, inline it in check_
+- Verify: `distributed >= totalCollected - 3 && distributed <= totalCollected`
+- **IMPORTANT**: Use tolerance of 3 wei (1 per integer division), NOT exact `==`.
+- The function must be `pure` — no state reads, no contract calls.
 
-### 2. P-10: Provider-First Slashing (CRITICAL)
-- State setup needed but bounded
-- Verify: provider stake decreases before delegation pool
-- **IMPORTANT**: Read `HorizonStaking.slash()` source code and use its REAL function signatures.
-  Do NOT invent functions like `getProviderStake()` — check what actually exists.
-- Bound: providerStake, delegatorTokens, slashAmount as symbolic uint128
-- May need --loop 3 if slash iterates over provisions
+### 2. P-10: Provider-First Slashing (GOOD FIT — MODEL THE LOGIC)
+- Read `HorizonStaking._slash()` source, extract the if/else logic, inline it in check_
+- Verify: when `slashAmount <= providerStake`, delegators are untouched; provider always drained first
+- **DO NOT call `staking.slash()`** — model the conditional arithmetic inline.
+- The function should be `pure`.
 
-### 3. P-19: Operator Cannot Extract Value (CRITICAL)
-- Verify: for any single operator-callable function, operator token balance does not increase
-- Bound: check each function independently (not sequences — that's fuzzing territory)
-- May timeout on complex functions — fall back to per-function checks
+### 3. P-16: RAV Monotonicity (GOOD FIT — PURE COMPARISON)
+- Read `PaymentsEscrow` source for the RAV update logic
+- Verify: `newValueAggregate >= oldValueAggregate` — inline the comparison arithmetic
+- The function should be `pure`.
 
-### 4. P-1: Stake Conservation (MAY TIMEOUT)
-- Verify: for any single state-changing function, total accounted stake == GRT balance
-- Likely to timeout on complex functions — fall back to fuzzing if > 30 min
-- Try with --loop 2 first
+### 4. P-19: Operator Value Extraction (MEDIUM — MODEL BALANCE CHANGE)
+- Inline a simplified model of the operator action's token flow
+- Verify: operator's modelled net token delta is <= 0 after a single action
+- **DO NOT deploy a staking contract** — model the token accounting math directly.
 
-### 5. P-16: RAV Monotonicity
-- Verify: new valueAggregate >= previous for any collect operation
-- Relatively simple if you can isolate the comparison logic
+### 5. P-1: Stake Conservation (SKIP OR SIMPLIFY)
+- This requires full contract state — too complex for Halmos.
+- If you attempt it, model ONLY the accounting math (delta in == delta out) as pure arithmetic.
+- If you cannot write a meaningful pure-math check, skip this property and note it in the assessment.
 
 ## Halmos Limitations (be honest in output)
 
@@ -157,9 +170,9 @@ Ordered by priority and Halmos suitability:
 **CRITICAL**: Your tests MUST compile with `forge build`. To ensure this:
 - Copy import paths exactly from existing tests — do NOT guess import paths
 - Use the same pragma solidity version as existing tests
-- Use the same base contracts and deployment helpers as existing tests
-- After writing each file, run `forge build` to verify it compiles before moving on
-- If it fails, read the error, fix the imports, and try again
+- Only import `forge-std/Test.sol` — do NOT import halmos-cheatcodes or any Graph contract
+- Write ALL test files first, then run `forge build` ONCE — do not compile after each file
+- If it fails, fix all errors in a single pass and recompile once more
 
 ## Output
 
