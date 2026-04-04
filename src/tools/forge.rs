@@ -1,11 +1,13 @@
 use crate::error::Result;
 use std::path::Path;
 
-/// Run `forge build --force` in a package directory.
+/// Run `forge build --force --ast` in a package directory.
+/// The `--ast` flag embeds source AST in build artifacts — required by Halmos 0.2.x
+/// for symbolic execution. Without it, Halmos crashes with `IndexError: pop from empty list`.
 pub async fn build(forge_bin: &Path, pkg_dir: &Path) -> Result<BuildResult> {
     let output = super::run_command(
         forge_bin.to_str().unwrap_or("forge"),
-        &["build", "--force"],
+        &["build", "--force", "--ast"],
         pkg_dir,
     )
     .await?;
