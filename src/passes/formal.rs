@@ -58,6 +58,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&formal_dir, &forge_test_dir)?;
 
+        // Halmos 0.2.x does not support Cancun EVM opcodes (MCOPY, TLOAD, TSTORE).
+        // Solidity 0.8.24+ defaults to Cancun, producing bytecode Halmos can't execute.
+        // Patch foundry.toml to force evm_version = "shanghai" for the formal pass only.
+        patch_foundry_evm_version(&build_dir, "shanghai");
+
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
         let result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
@@ -495,6 +500,41 @@ fn patch_bare_check_names(dir: &Path) {
             let _ = std::fs::write(&path, &patched);
         }
     }
+}
+
+/// Patch (or add) `evm_version = "<version>"` in the `[profile.default]` section of foundry.toml.
+/// Halmos 0.2.x cannot execute Cancun opcodes (MCOPY, TLOAD, TSTORE) — force "shanghai" to avoid
+/// `IndexError: pop from empty list` on any contract compiled with solc 0.8.24+.
+fn patch_foundry_evm_version(build_dir: &Path, version: &str) {
+    let toml_path = build_dir.join("foundry.toml");
+    let Ok(content) = std::fs::read_to_string(&toml_path) else { return };
+
+    let new_line = format!("evm_version = \"{version}\"");
+
+    // If already set, replace it
+    if content.contains("evm_version") {
+        let patched = content
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("evm_version") {
+                    new_line.as_str()
+                } else {
+                    l
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = std::fs::write(&toml_path, patched);
+        return;
+    }
+
+    // Insert after [profile.default]
+    let patched = content.replacen(
+        "[profile.default]",
+        &format!("[profile.default]\n{new_line}"),
+        1,
+    );
+    let _ = std::fs::write(&toml_path, patched);
 }
 
 /// Read `out = '...'` from foundry.toml, defaulting to "out" if not found.
