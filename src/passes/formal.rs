@@ -52,8 +52,18 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let build_dir = ctx.build_dir();
     let tests_exist = count_sol_files(&formal_dir) > 0;
 
-    // Copy generated tests into the forge project so forge can find them
+    // Copy generated tests into the forge project so forge can find them.
+    // Clear stale .sol files first — old AI experiments (test_minimal.sol, test_require.sol, etc.)
+    // that import forge-std/Test.sol will cause Halmos to crash on every function if left behind.
     let forge_test_dir = build_dir.join("test/formal");
+    if forge_test_dir.exists() {
+        for entry in std::fs::read_dir(&forge_test_dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            if p.extension().is_some_and(|e| e == "sol") {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
     if tests_exist {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&formal_dir, &forge_test_dir)?;
