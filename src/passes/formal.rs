@@ -74,14 +74,26 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         // A minimal config is sufficient: our tests are pure arithmetic with no imports.
         ensure_formal_foundry_toml(&formal_dir);
 
+        // Build with the exact flags Halmos needs in the artifacts:
+        //   --ast            → Halmos uses AST for symbolic analysis
+        //   --extra-output storageLayout metadata → Halmos reads these from each artifact
+        // If we pre-build without these, Halmos sees "No files changed" and uses our
+        // incomplete artifacts, then crashes with IndexError: pop from empty list.
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
-        let result = crate::tools::forge::build(&forge_bin, &formal_dir).await?;
-        if result.success {
+        let build_output = crate::tools::run_command(
+            forge_bin.to_str().unwrap_or("forge"),
+            &["build", "--force", "--ast", "--extra-output", "storageLayout", "metadata"],
+            &formal_dir,
+        ).await?;
+        let build_ok = build_output.status.success()
+            || String::from_utf8_lossy(&build_output.stderr).contains("Compiler run successful");
+        if build_ok {
             eprintln!("  {} Symbolic tests compile", style("✓").green());
         } else {
+            let stderr = String::from_utf8_lossy(&build_output.stderr).to_string();
             eprintln!("  {} Some tests failed to compile", style("⚠").yellow());
-            let _ = std::fs::write(logs_dir.join("formal-build.log"), &result.stderr);
+            let _ = std::fs::write(logs_dir.join("formal-build.log"), &stderr);
         }
     }
 

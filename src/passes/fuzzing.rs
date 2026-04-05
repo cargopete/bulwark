@@ -65,6 +65,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "  Found {invariant_count} invariant_ function(s) in test/invariant/"
         );
 
+        // Remove stub/disabled PoC files before compiling — failed PoC generation sometimes
+        // leaves behind comment-only stubs (or files the AI "disabled") that still get compiled
+        // and can have bad imports that break the entire build.
+        clean_stub_poc_files(&build_dir.join("test/pocs"));
+
         eprintln!("  Compiling invariant tests...");
         // First attempt — may fail due to missing remappings
         let build_result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
@@ -443,4 +448,25 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+/// Remove any .sol files in `pocs_dir` that contain no real Solidity code (only comments/blanks).
+/// Failed PoC generation can leave stubs like "// File disabled ..." that still get compiled
+/// and can contain stale imports that break the entire forge build in subsequent passes.
+fn clean_stub_poc_files(pocs_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(pocs_dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "sol") {
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            // A stub file has no lines with actual Solidity content (no `contract`, `pragma`, `import`, etc.)
+            let has_real_content = content.lines().any(|l| {
+                let t = l.trim();
+                !t.is_empty() && !t.starts_with("//") && !t.starts_with("/*") && !t.starts_with('*')
+            });
+            if !has_real_content {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
 }
