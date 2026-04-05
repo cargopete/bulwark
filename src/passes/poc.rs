@@ -327,11 +327,16 @@ async fn generate_and_validate_poc(
             if retry < max_retries {
                 let error_file = logs_dir.join(format!("{}-build-error-{retry}.txt", finding.id));
                 let _ = std::fs::write(&error_file, &build_combined);
+                // Remove the broken file so it doesn't poison Pass 4's forge build
+                let _ = std::fs::remove_file(&poc_in_project);
             } else {
                 eprintln!(
                     "    {} All retries exhausted",
                     style("✗").red()
                 );
+                // Remove the broken PoC from the forge project — a file that fails to compile
+                // will break subsequent passes (Pass 4 fuzzing compile, etc.)
+                let _ = std::fs::remove_file(&poc_in_project);
                 return "failed_to_compile".into();
             }
         }

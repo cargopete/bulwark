@@ -70,9 +70,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     }
 
     if tests_exist {
-        // Halmos 0.2.x does not support Cancun EVM opcodes (MCOPY, TLOAD, TSTORE).
-        // Solidity 0.8.24+ defaults to Cancun — force "shanghai" in formal_dir's foundry.toml.
-        patch_foundry_evm_version(&formal_dir, "shanghai");
+        // Ensure there is a foundry.toml in formal_dir — the AI sometimes skips it.
+        // A minimal config is sufficient: our tests are pure arithmetic with no imports.
+        ensure_formal_foundry_toml(&formal_dir);
 
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
@@ -498,6 +498,30 @@ fn patch_bare_check_names(dir: &Path) {
             let _ = std::fs::write(&path, &patched);
         }
     }
+}
+
+/// Ensure formal_dir has a valid foundry.toml for standalone Halmos execution.
+/// The AI sometimes generates one with full remappings, sometimes skips it entirely.
+/// We create a minimal self-sufficient config if absent, or patch evm_version if present.
+/// Pure arithmetic tests (no imports) need no remappings.
+fn ensure_formal_foundry_toml(formal_dir: &Path) {
+    let toml_path = formal_dir.join("foundry.toml");
+    if toml_path.exists() {
+        // Exists — just enforce evm_version = "shanghai"
+        patch_foundry_evm_version(formal_dir, "shanghai");
+        return;
+    }
+    // Create a minimal config. No libs/remappings needed for import-free pure tests.
+    let minimal = r#"[profile.default]
+src = "."
+test = "."
+out = "out"
+cache_path = ".cache"
+evm_version = "shanghai"
+optimizer = true
+optimizer_runs = 200
+"#;
+    let _ = std::fs::write(&toml_path, minimal);
 }
 
 /// Patch (or add) `evm_version = "<version>"` in the `[profile.default]` section of foundry.toml.
