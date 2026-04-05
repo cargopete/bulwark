@@ -43,6 +43,9 @@ if [ ! -d "$AUDIT_DIR/.git" ]; then
 else
     echo "→ Updating existing clone..."
     cd "$AUDIT_DIR" && git fetch origin && git reset --hard "origin/$AUDIT_BRANCH"
+    # Remove untracked pipeline-generated files (test/pocs/, test/bulwark/, test/formal/, out/)
+    # so stale PoCs/invariant tests from a previous run don't break the current build.
+    git clean -fd -- packages/horizon/test/pocs/ packages/horizon/test/bulwark/ packages/horizon/test/formal/ packages/horizon/out/ 2>/dev/null || true
 fi
 
 cd "$AUDIT_DIR"
