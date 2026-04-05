@@ -4,8 +4,8 @@ Multi-pass, multi-agent smart contract audit pipeline.
 Rust CLI + Docker container with Slither, Forge, Halmos, Claude Code, and 70 AI audit skills.
 
 > **Status**: Full 6-pass pipeline runs end-to-end (~70 min on Graph Protocol contracts).
-> All 6 passes operational. Pass 3 achieves 100% PoC validation rate (3/3 validated, 0 inconclusive).
-> Pass 4 runs 90 invariant tests. Pass 5 verifies all 5 properties with real symbolic execution (~41s each).
+> All 6 passes operational. Pass 5 (Halmos) runs all 5 properties with real symbolic execution;
+> `Counterexample: unknown` (solver timeout) is correctly distinguished from real violations.
 > Deduplication correctly merges findings across agents.
 
 ## Quick Start
@@ -110,16 +110,21 @@ For each finding from Pass 2:
 
 Claude (Sonnet) generates Foundry invariant tests from PROPERTIES.md. Tests are placed
 alongside the project's existing invariant tests and run with `forge test --match-test invariant_`.
-Missing Forge remappings are auto-detected and patched before compilation.
+Missing Forge remappings are auto-detected and patched before compilation. AI-generated files
+are sanitized to replace curly/smart quotes and typographic dashes (Solidity only accepts ASCII).
 Medusa and Echidna integration coded but not yet installed.
 
 ### Pass 5: Formal Verification
 
-Claude (Sonnet) generates symbolic tests for critical properties. Halmos runs bounded
+Claude (Sonnet) generates symbolic tests for critical properties. Tests run in an isolated
+directory (5 files, not the full project) with a minimal `foundry.toml`. Halmos runs bounded
 model checking on each property, producing VERIFIED/VIOLATED/TIMEOUT results.
-Test functions must follow `check_P{N}_{description}` naming (suffix required) so
-Halmos's prefix matching doesn't cross-contaminate results between properties (e.g. P-1 vs P-10).
-The `--forge-build-out` flag is read from `foundry.toml` so non-default output directories work.
+- `Counterexample: unknown` = solver timed out, classified as TIMEOUT not VIOLATED
+- VACUOUS detection uses `[PASS]`/`[FAIL]`/`[TIMEOUT]` markers, not duration heuristics
+- Test functions must follow `check_P{N}_{description}` naming (suffix required)
+- Bare `check_P10()` names are auto-renamed to `check_P10_verify()` before compilation
+- A Dockerfile patch guards `sevm.py`'s `clear_live()` call against empty `_live_stack`
+  (Halmos crashes in non-TTY subprocesses without this fix)
 
 ### Pass 6: Adversarial Review
 

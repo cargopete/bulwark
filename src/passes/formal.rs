@@ -176,7 +176,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let _ = std::fs::write(formal_dir.join(format!("halmos-{prop}.log")), &combined);
 
             let combined_lower = combined.to_lowercase();
-            let status = if combined.contains("Counterexample") || combined.contains("counterexample") {
+            // "Counterexample: unknown" means the solver timed out without finding a real
+            // counterexample — it is NOT a violation. Only flag VIOLATED when Halmos
+            // produces a concrete counterexample with actual values.
+            let has_real_counterexample = (combined.contains("Counterexample") || combined.contains("counterexample"))
+                && !combined_lower.contains("counterexample: unknown");
+            let status = if has_real_counterexample {
                 eprintln!(
                     "    {} {prop}: VIOLATED — counterexample found ({duration}s)",
                     style("⚠").yellow()
@@ -194,8 +199,12 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                 // This is different from VACUOUS (no tests matched) or VERIFIED (tests passed).
                 let zero_passed_with_fails = combined.contains("0 passed")
                     && (combined.contains("failed") || combined_lower.contains("error"));
-                // Under 5s with no real output = no matching functions (bare name issue)
-                let no_tests_ran = duration < 5 && !combined.contains("0 passed");
+                // VACUOUS = no functions matched. Detect by absence of [PASS]/[FAIL]/[TIMEOUT]
+                // markers. Do NOT use duration alone — pure arithmetic tests finish in < 1s.
+                let any_ran = combined.contains("[PASS]")
+                    || combined.contains("[FAIL]")
+                    || combined.contains("[TIMEOUT]");
+                let no_tests_ran = !any_ran && duration < 5;
 
                 if zero_passed_with_fails {
                     eprintln!(

@@ -63,6 +63,13 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir halmos \
     && ln -sf /opt/solidity-tools/bin/halmos /usr/local/bin/halmos \
     || echo "WARNING: Halmos install failed (optional) — continuing without it"
 
+# Patch Halmos sevm.py: guard clear_live() against empty _live_stack.
+# When Halmos runs in a non-TTY subprocess (our Rust pipeline), Rich never
+# starts a live display so _live_stack is empty — unguarded .pop() crashes.
+# Single-line python3 -c avoids Docker misreading 'import' as a Dockerfile instruction.
+RUN /opt/solidity-tools/bin/python3 -c "import pathlib; p=pathlib.Path('/opt/solidity-tools/lib/python3.12/site-packages/halmos/sevm.py'); old='rich.get_console().clear_live()'; new='try:\n            rich.get_console().clear_live()\n        except IndexError:\n            pass'; (lambda c: p.write_text(c.replace(old,new)) or print('Patched halmos/sevm.py'))(p.read_text()) if p.exists() and old in p.read_text() else print('sevm.py patch: skipped')" \
+    || echo "WARNING: sevm.py patch failed — Pass 5 may crash in non-TTY mode"
+
 # ── Foundry (Forge, Cast, Anvil) ────────────────────────────────────
 RUN curl -L https://foundry.paradigm.xyz | bash \
     && /root/.foundry/bin/foundryup

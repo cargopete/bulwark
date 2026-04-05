@@ -59,6 +59,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     if tests_exist {
         std::fs::create_dir_all(&forge_test_dir)?;
         copy_sol_files(&invariant_dir, &forge_test_dir)?;
+        sanitize_sol_unicode(&forge_test_dir);
 
         let invariant_count = count_invariant_functions(&forge_test_dir) + count_invariant_functions(&build_dir.join("test"));
         eprintln!(
@@ -448,6 +449,29 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+/// Replace curly/smart quotes and typographic dashes in AI-generated .sol files.
+/// Solidity only accepts ASCII string literals; curly quotes cause parse errors.
+fn sanitize_sol_unicode(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "sol") {
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let sanitized = content
+                .replace('\u{201C}', "\"") // left double quotation mark "
+                .replace('\u{201D}', "\"") // right double quotation mark "
+                .replace('\u{2018}', "'")  // left single quotation mark '
+                .replace('\u{2019}', "'")  // right single quotation mark '
+                .replace('\u{2014}', "--") // em dash —
+                .replace('\u{2013}', "-")  // en dash –
+                .replace('\u{2026}', "..."); // horizontal ellipsis …
+            if sanitized != content {
+                let _ = std::fs::write(&path, sanitized);
+            }
+        }
+    }
 }
 
 /// Remove any .sol files in `pocs_dir` that contain no real Solidity code (only comments/blanks).
