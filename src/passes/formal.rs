@@ -49,44 +49,34 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     patch_bare_check_names(&formal_dir);
 
     // ── Step 2: Compile ─────────────────────────────────────────────
-    let build_dir = ctx.build_dir();
+    // We build and run Halmos directly in formal_dir using the AI-generated foundry.toml.
+    // This is a small isolated project (5 files) vs the full 287-file horizon package —
+    // much less interference, and out/ is always freshly built for this pass.
     let tests_exist = count_sol_files(&formal_dir) > 0;
 
-    // Copy generated tests into the forge project so forge can find them.
-    // Clear stale .sol files first — old AI experiments (test_minimal.sol, test_require.sol, etc.)
-    // that import forge-std/Test.sol will cause Halmos to crash on every function if left behind.
-    let forge_test_dir = build_dir.join("test/formal");
-    if forge_test_dir.exists() {
-        for entry in std::fs::read_dir(&forge_test_dir).into_iter().flatten().flatten() {
+    // Remove any stale .sol files from previous AI experiments that might have imports
+    // (test_minimal.sol, test_require.sol etc) — they crash Halmos if left behind.
+    if formal_dir.exists() {
+        for entry in std::fs::read_dir(&formal_dir).into_iter().flatten().flatten() {
             let p = entry.path();
             if p.extension().is_some_and(|e| e == "sol") {
-                let _ = std::fs::remove_file(&p);
+                // Only keep the canonical Symbolic*.t.sol files the generator should produce
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !name.starts_with("Symbolic") {
+                    let _ = std::fs::remove_file(&p);
+                }
             }
         }
     }
-    if tests_exist {
-        std::fs::create_dir_all(&forge_test_dir)?;
-        copy_sol_files(&formal_dir, &forge_test_dir)?;
 
+    if tests_exist {
         // Halmos 0.2.x does not support Cancun EVM opcodes (MCOPY, TLOAD, TSTORE).
-        // Solidity 0.8.24+ defaults to Cancun, producing bytecode Halmos can't execute.
-        // Patch foundry.toml to force evm_version = "shanghai" for the formal pass only.
-        patch_foundry_evm_version(&build_dir, "shanghai");
+        // Solidity 0.8.24+ defaults to Cancun — force "shanghai" in formal_dir's foundry.toml.
+        patch_foundry_evm_version(&formal_dir, "shanghai");
 
         eprintln!("  Compiling symbolic tests...");
         let forge_bin = ctx.config.resolve_tool("forge")?;
-        let result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
-        let result = if !result.success {
-            let patched = crate::passes::fuzzing::patch_missing_remappings(&build_dir, &result.stderr);
-            if patched > 0 {
-                eprintln!("  Added {patched} missing remapping(s) — recompiling...");
-                crate::tools::forge::build(&forge_bin, &build_dir).await?
-            } else {
-                result
-            }
-        } else {
-            result
-        };
+        let result = crate::tools::forge::build(&forge_bin, &formal_dir).await?;
         if result.success {
             eprintln!("  {} Symbolic tests compile", style("✓").green());
         } else {
@@ -121,15 +111,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let loop_str = loop_bound.to_string();
         let total_timeout_str = (solver_timeout + 60).to_string();
 
-        // Read the forge out dir from foundry.toml (may differ from default "out")
-        let forge_out_dir = read_foundry_out_dir(&build_dir);
+        // Halmos runs in formal_dir; out/ is always freshly built above.
+        let forge_out_dir = read_foundry_out_dir(&formal_dir);
 
         for prop in &properties {
             let prop_num = prop.strip_prefix("P-").unwrap_or(prop);
-            // Bare name for searching file contents; underscore-suffixed for Halmos invocation
-            // so "check_P1_" doesn't prefix-match "check_P10_", "check_P15_", etc.
-            // Suffix is required: "check_P10_" matches "check_P10_something" but NOT bare "check_P10()"
-            // This prevents both vacuous VERIFIED results and cross-property prefix contamination.
+            // Underscore-suffixed for Halmos prefix matching so check_P1_ doesn't
+            // match check_P10_, check_P15_, etc.
             let check_func = format!("check_P{prop_num}_");
 
             // Check if any test file contains a properly-suffixed function
@@ -163,7 +151,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                     &forge_out_dir,
                     "-vvv",
                 ],
-                &build_dir,
+                &formal_dir,
             )
             .await?;
 
