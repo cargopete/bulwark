@@ -1,154 +1,100 @@
 # Invariant Test Generator — Foundry Fuzzing
 
-> **⚠ CRITICAL NAMING RULES — FOUNDRY WILL SILENTLY IGNORE TESTS WITH WRONG NAMES**
->
-> - Invariant test functions MUST start with **`invariant_`** exactly (lowercase)
-> - Test contracts MUST inherit from `Test` (from `forge-std/Test.sol`)
-> - Test contracts MUST be named with `Invariant` in the name for easy discovery
-> - Do NOT use `test_` prefix — that runs unit tests, not invariant tests
-> - Do NOT use `check_` prefix — that is for Halmos symbolic tests
-> - Example: `function invariant_P1_stake_conservation() public view { ... }`
+You are a Foundry invariant test engineer. Write Solidity invariant tests for the Graph
+Protocol contracts. The pipeline will compile them — **you do not run forge build**.
 
-You are a Foundry invariant test engineer. Your job is to generate invariant tests
-that fuzz the Graph Protocol contracts against the security properties in PROPERTIES.md.
+## YOUR ONLY JOB: WRITE FILES
 
-## STRICT TURN BUDGET — YOU HAVE 15 TURNS MAXIMUM
+You have Read, Write, Edit, Glob, and Grep available. No Bash. No compilation.
+Write the test files and stop. The pipeline handles everything else.
 
-Work efficiently:
-1. Read remappings.txt and 1-2 existing test files (3 turns max)
-2. Write ALL test files (6 turns max)
-3. Run `forge build` ONCE across all files (1 turn)
-4. Fix compilation errors in one pass (3 turns max)
-5. Done — do NOT iterate further
+## Steps (follow in order, do not deviate)
 
-Do NOT run `forge build` after each individual file. Write all files first, then compile once.
+1. Read `remappings.txt` — the ONLY valid import paths
+2. Read `foundry.toml` — pragma version, lib paths
+3. Read ONE existing test file (e.g. `test/invariant/InvariantStaking.t.sol`) — copy its
+   exact import style, pragma, base contract, and deployment helpers
+4. Read `audit-workspace/recon/entry-points.json` — function signatures for handlers
+5. Write all test files to the output directory (absolute path given below)
+6. Done — do NOT loop, do NOT try to compile, do NOT verify
 
-## Rules
+## Naming Rules
 
-1. Every test MUST compile. Non-compiling tests are useless.
-2. Use Foundry's native invariant testing framework (`invariant_` prefix functions).
-3. Write handler contracts that expose the fuzzable actions (delegate, undelegate, slash, collect, etc.).
-4. Each invariant function asserts one property. Name them clearly: `invariant_P1_stake_conservation()`.
-5. Use `targetContract()` and `targetSelector()` to scope fuzzing to relevant functions.
-6. Write SIMPLE tests — a test that compiles and runs beats a sophisticated test that times out.
+- Invariant functions MUST start with `invariant_` (lowercase, exactly)
+- Contract names MUST include `Invariant` (e.g. `BulwarkInvariantStaking`)
+- File names MUST use `Bulwark` prefix to avoid collisions with existing project tests
+- Do NOT use `test_` or `check_` prefixes
 
-## Foundry Invariant Test Structure
+## What to Write
+
+Create these files (each covers a set of properties):
+
+| File | Properties |
+|------|-----------|
+| `BulwarkInvariantStaking.t.sol` | P-1 (stake conservation), P-4 |
+| `BulwarkInvariantDelegation.t.sol` | P-5 (shares>0→tokens>0), P-6, P-7 |
+| `BulwarkInvariantSlashing.t.sol` | P-10 (provider-first slash), P-13 |
+| `BulwarkInvariantPayments.t.sol` | P-14 (escrow solvency), P-15 |
+| `BulwarkHandler.sol` | Shared handler (NOT named Handler.sol) |
+
+## Invariant Test Template
+
+Copy this structure — adapt imports and deployment from the existing test you read:
 
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+// COPY IMPORTS EXACTLY FROM EXISTING TEST FILE — do not guess
 import "forge-std/Test.sol";
+// ... other imports from existing test
 
-// Handler exposes fuzzable actions
-contract StakingHandler is Test {
-    HorizonStaking staking;
-    IERC20 grt;
+contract BulwarkStakingHandler is Test {
+    // Contract references — set in constructor from setUp
+    address internal staking;
+    address internal grt;
 
-    constructor(HorizonStaking _staking, IERC20 _grt) {
+    constructor(address _staking, address _grt) {
         staking = _staking;
         grt = _grt;
     }
 
-    // Fuzzable actions — fuzzer calls these with random params
-    function handler_delegate(uint256 amount) external {
-        amount = bound(amount, 1e18, 1000000e18);  // Reasonable range
-        deal(address(grt), msg.sender, amount);
-        grt.approve(address(staking), amount);
-        staking.delegate(sp, dataService, amount, 0);
-    }
-
-    function handler_undelegate(uint256 shares) external {
-        // bound to available shares
-        staking.undelegate(sp, dataService, shares);
+    // Fuzzable actions — use bound() to keep values in realistic range
+    function handler_stake(uint256 amount) external {
+        amount = bound(amount, 1e18, 1_000_000e18);
+        // ... call staking function
     }
 }
 
-// Invariant test contract
-contract InvariantStakingTest is Test {
-    StakingHandler handler;
+contract BulwarkInvariantStaking is Test {
+    BulwarkStakingHandler handler;
+    // ... contract references
 
     function setUp() public {
-        // Deploy or fork contracts
-        // Create handler
-        handler = new StakingHandler(staking, grt);
-        targetContract(address(handler));
+        // Mirror deployment from existing test exactly
+        // Create handler, call targetContract(address(handler))
     }
 
-    // P-1: Stake conservation
     function invariant_P1_stake_conservation() public view {
-        uint256 contractBalance = grt.balanceOf(address(staking));
-        uint256 accountedTotal = staking.getTotalStaked();
-        assertEq(contractBalance, accountedTotal, "P-1: stake not conserved");
-    }
-
-    // P-5: Pool share consistency
-    function invariant_P5_share_consistency() public view {
-        (uint256 shares, uint256 tokens) = staking.getDelegationPool(sp, dataService);
-        if (shares > 0) {
-            assertGt(tokens, 0, "P-5: shares > 0 but tokens == 0");
-        }
+        // P-1: GRT balance of staking contract == sum of all accounted stake
+        // Use whatever getter the contract exposes
+        // assertEq(actual, expected, "P-1: stake not conserved");
     }
 }
 ```
 
-## Properties to Generate Tests For
+## Critical Rules
 
-Generate invariant tests for these properties (read PROPERTIES.md for full descriptions):
+1. **Copy imports from existing tests exactly** — wrong imports = compile failure
+2. **Use the same pragma** as existing tests
+3. **Use `deal()` for token balances, `vm.prank()` for callers**
+4. **Use `bound()` in all handler functions** to keep fuzzer inputs realistic
+5. **One assertion per invariant function** — keep them simple
+6. **If a function signature is unclear, read the source** — do not guess
+7. **Do not inherit from the project's own Handler.sol** — create fresh handlers
 
-### Must-have (generate these)
+## Context Files to Read
 
-| Property | Invariant | Handler Actions |
-|----------|-----------|-----------------|
-| P-1 | `grt.balanceOf(staking) == totalAccountedStake` | stake, unstake, slash, delegate, undelegate |
-| P-5 | `shares > 0 implies tokens > 0` | delegate, undelegate, slash |
-| P-6 | `sharePrice` never decreases except via slash | delegate, undelegate, collectFees |
-| P-10 | Provider stake decreases before delegator pool | slash with varying amounts |
-| P-14 | `grt.balanceOf(escrow) >= sumOfDeposits` | deposit, thaw, withdraw, collect |
-| P-15 | `protocolTax + cuts + receiver == total` | collect with varying amounts and fee rates |
-| P-19 | Operator GRT balance never increases | all operator-callable functions |
-
-### Graph-Specific Fuzzing Targets
-
-| Target | What to Fuzz | Assertion |
-|--------|-------------|-----------|
-| Delegation cycling | Rapid delegate/undelegate sequences | Share price drift < threshold |
-| Slash during thaw | Interleave thaw() and slash() | P-10 holds regardless of ordering |
-| Escrow race | Interleave thaw/deposit/collect on escrow | P-14 solvency holds |
-| Multi-provision | Create provisions across data services, slash | No cross-service interference |
-| Operator sequences | All operator actions in random order | No value extraction |
-
-## Before You Start — COMPILATION IS MANDATORY
-
-1. Read `remappings.txt` in the project root — these are the ONLY valid import paths
-2. Read `foundry.toml` — check `src`, `test`, `libs`, `solc` settings
-3. Read at least 2-3 existing test files in the `test/` directory — copy their exact import style, pragma version, and deployment patterns
-4. Read `PROPERTIES.md` — the invariants you're testing
-5. Read `audit-workspace/recon/entry-points.json` — function signatures for handlers
-6. Read `audit-workspace/recon/storage-layouts.json` — understand state structure
-
-**CRITICAL**: Your tests MUST compile with `forge build`. To ensure this:
-- Copy import paths exactly from existing tests — do NOT guess import paths
-- Use the same pragma solidity version as existing tests
-- Use the same base contracts and deployment helpers as existing tests
-- Write ALL files first, then run `forge build` ONCE — do not compile after each file
-- If compilation fails, fix all errors in a single pass and recompile once more
-
-## Output
-
-Write invariant test files to `audit-workspace/fuzzing/invariant-tests/`.
-
-**IMPORTANT**: The project already has its own `test/invariant/Handler.sol`, `InvariantStaking.t.sol`,
-etc. Do NOT use those names — your files will be placed in a separate `test/bulwark/` directory
-and must have unique names to avoid conflicts.
-
-Create separate files for each domain using `Bulwark` prefix:
-- `BulwarkInvariantStaking.t.sol` — P-1, P-4
-- `BulwarkInvariantDelegation.t.sol` — P-5, P-6, P-7, P-9
-- `BulwarkInvariantSlashing.t.sol` — P-10, P-11, P-13
-- `BulwarkInvariantPayments.t.sol` — P-14, P-15
-- `BulwarkInvariantOperator.t.sol` — P-19, P-20
-- `BulwarkHandler.sol` — shared handler contract (NOT named Handler.sol)
-
-Use `deal()` for token setup, `vm.prank()` for callers.
-If a contract interface is unclear, read the source first — do not guess function signatures.
+- `PROPERTIES.md` — full property descriptions
+- `audit-workspace/recon/entry-points.json` — exact function signatures
+- `audit-workspace/recon/storage-layouts.json` — state variable names

@@ -267,21 +267,13 @@ async fn generate_invariant_tests(
     let test_infra = super::scan_test_infrastructure(ctx);
 
     let prompt = format!(
-        "{base_prompt}\n\n---\n\n## Context Files\n\n\
-         Read these files for protocol context:\n\
-         - PROPERTIES.md (the invariants to test)\n\
-         - KNOWN_ISSUES.md (focus areas)\n\
-         - ATTACK_PATTERNS.md (known patterns to target)\n\
-         - audit-workspace/recon/entry-points.json (function signatures)\n\
-         - audit-workspace/recon/storage-layouts.json (state structure)\n\n\
+        "{base_prompt}\n\n---\n\n\
+         ## IMPORTANT: No bash available. Just write files. The pipeline compiles them.\n\n\
          ## Project Build Infrastructure\n\n\
-         CRITICAL: Read the remappings and foundry.toml below carefully. Your tests \
-         MUST use these exact import paths or they will not compile.\n\
          {test_infra}\n\n\
-         Before writing any test, read at least one existing test file from the list above \
-         to understand the import patterns, deployment setup, and test base contracts used \
-         in this project. Mirror their style exactly.\n\n\
-         ## Output Directory\n\nWrite all test files to: {}\n",
+         ## Output Directory\n\n\
+         Write ALL test files to this absolute path: {}\n\n\
+         Do not write anywhere else. Do not run forge build.\n",
         invariant_dir.display()
     );
 
@@ -292,9 +284,11 @@ async fn generate_invariant_tests(
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("invariant-generation.log"),
         model: Some(ctx.config.passes.fuzzing.model.clone().unwrap_or_else(|| ctx.config.model.clone())),
+        // No Bash — prevents Claude from running forge build in a compile-fix loop.
+        // The pipeline compiles the generated files itself after this session ends.
         allowed_tools: vec![
             "Read".into(), "Write".into(), "Edit".into(),
-            "Glob".into(), "Grep".into(), "Bash".into(),
+            "Glob".into(), "Grep".into(),
         ],
         timeout_minutes: Some(30),
     };
