@@ -294,10 +294,11 @@ fn collect_pragma_versions(ctx: &PipelineContext) -> Result<Value> {
     let mut versions = Vec::new();
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
         for sol_file in find_sol_files(&contracts_dir) {
             let content = std::fs::read_to_string(&sol_file)?;
             for line in content.lines() {
@@ -340,10 +341,11 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
     let slither_bin = ctx.config.resolve_tool("slither")?;
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
 
         let pkg_name = Path::new(pkg)
             .file_name()
@@ -468,15 +470,46 @@ async fn map_entry_points(ctx: &PipelineContext, forge_bin: &Path) -> Result<Val
     Ok(entry_points)
 }
 
-fn find_contract_source(pkg_dir: &Path, contract_name: &str) -> Option<PathBuf> {
-    let target = format!("{contract_name}.sol");
-    let contracts_dir = pkg_dir.join("contracts");
-    if !contracts_dir.exists() {
-        return None;
+/// Return the directory to scan for .sol files within a package.
+/// Prefers `{pkg}/contracts/` (Hardhat/Foundry monorepo layout) but falls back to
+/// `{pkg}/src/` then `{pkg}` itself for repos like olympus-v3 that use `src/` directly.
+fn sol_root(pkg_dir: &Path) -> PathBuf {
+    for subdir in &["contracts", "src"] {
+        let d = pkg_dir.join(subdir);
+        if d.exists() {
+            return d;
+        }
     }
-    find_sol_files(&contracts_dir)
-        .into_iter()
-        .find(|p| p.file_name().unwrap_or_default().to_string_lossy() == target)
+    pkg_dir.to_path_buf()
+}
+
+fn find_contract_source(pkg_dir: &Path, contract_name: &str) -> Option<PathBuf> {
+    let exact_filename = format!("{contract_name}.sol");
+    // Matches `contract Foo`, `abstract contract Foo`, `interface Foo`
+    let declaration = format!("contract {contract_name}");
+    let interface_declaration = format!("interface {contract_name}");
+
+    find_sol_files(&sol_root(pkg_dir)).into_iter().find(|p| {
+        let fname = p.file_name().unwrap_or_default().to_string_lossy();
+        // Fast path: exact filename (MyContract.sol)
+        if fname == exact_filename {
+            return true;
+        }
+        // Versioned filename: MyContract.v1.4.sol — stem starts with contract name
+        let stem = fname.strip_suffix(".sol").unwrap_or(&fname);
+        if stem == contract_name
+            || stem.starts_with(&format!("{contract_name}."))
+            || stem.starts_with(&format!("{contract_name}V"))
+        {
+            return true;
+        }
+        // Content match: grep for the contract declaration inside the file
+        std::fs::read_to_string(p)
+            .map(|content| {
+                content.contains(&declaration) || content.contains(&interface_declaration)
+            })
+            .unwrap_or(false)
+    })
 }
 
 async fn extract_storage_layouts(ctx: &PipelineContext, forge_bin: &Path) -> Result<Value> {
@@ -532,10 +565,11 @@ fn build_dependency_graph(ctx: &PipelineContext) -> Result<Value> {
     let mut graph = json!({"inheritance": {}, "external_calls": {}});
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
 
         for sol_file in find_sol_files(&contracts_dir) {
             let content = std::fs::read_to_string(&sol_file)?;
@@ -571,10 +605,11 @@ fn enumerate_access_control(ctx: &PipelineContext) -> Result<Value> {
     let mut access = json!({"modifiers": {}, "roles": {}});
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
 
         for sol_file in find_sol_files(&contracts_dir) {
             let content = std::fs::read_to_string(&sol_file)?;
@@ -659,10 +694,11 @@ fn inventory_math_operations(ctx: &PipelineContext) -> Result<Value> {
     let mut math = json!({});
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
 
         for contract_name in &ctx.config.target.math_sensitive {
             let target_file = format!("{contract_name}.sol");
@@ -747,7 +783,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         .scope
         .iter()
         .flat_map(|pkg| {
-            let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
+            let contracts_dir = sol_root(&ctx.audit_dir.join(pkg));
             find_sol_files(&contracts_dir)
                 .into_iter()
                 .filter_map(|p| {
@@ -858,12 +894,12 @@ fn detect_balance_delta_patterns(ctx: &PipelineContext) -> Result<Value> {
     let mut findings = Vec::new();
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
 
-        for sol_file in find_sol_files(&contracts_dir) {
+        for sol_file in find_sol_files(&sol_root(&pkg_path)) {
             let content = std::fs::read_to_string(&sol_file)?;
             let rel_file = sol_file
                 .strip_prefix(&ctx.audit_dir)
@@ -932,12 +968,12 @@ fn detect_routing_variables(ctx: &PipelineContext) -> Result<Value> {
     ];
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
 
-        for sol_file in find_sol_files(&contracts_dir) {
+        for sol_file in find_sol_files(&sol_root(&pkg_path)) {
             let content = std::fs::read_to_string(&sol_file)?;
             let rel_file = sol_file
                 .strip_prefix(&ctx.audit_dir)
@@ -1007,10 +1043,11 @@ fn identify_proxies(ctx: &PipelineContext) -> Result<Value> {
     ];
 
     for pkg in &ctx.config.target.scope {
-        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
-        if !contracts_dir.exists() {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
             continue;
         }
+        let contracts_dir = sol_root(&pkg_path);
 
         for sol_file in find_sol_files(&contracts_dir) {
             let content = std::fs::read_to_string(&sol_file)?;
