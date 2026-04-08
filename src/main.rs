@@ -54,7 +54,10 @@ async fn main() -> anyhow::Result<()> {
         .audit_dir
         .or_else(|| std::env::var("AUDIT_DIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| {
-            let base = std::env::var("BULWARK_ROOT")
+            // Audits live under BULWARK_INSTALL (the tool dir), not BULWARK_ROOT (the project dir).
+            // BULWARK_ROOT is the per-project config dir and should not accumulate audit outputs.
+            let base = std::env::var("BULWARK_INSTALL")
+                .or_else(|_| std::env::var("BULWARK_ROOT"))
                 .unwrap_or_else(|_| "/home/auditor".into());
             // Derive a name from the repo URL (last path component, strip .git)
             let repo_name = config
