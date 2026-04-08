@@ -67,8 +67,8 @@ if [ ! -d "$AUDIT_DIR/.git" ]; then
 else
     echo "→ Updating existing clone..."
     cd "$AUDIT_DIR" && git fetch origin && git reset --hard "origin/$AUDIT_BRANCH"
-    git clean -fd -- packages/horizon/test/pocs/ packages/horizon/test/bulwark/ \
-        packages/horizon/test/formal/ packages/horizon/out/ 2>/dev/null || true
+    # Clean bulwark-generated test artefacts so stale PoCs don't interfere with a fresh run
+    git clean -fd -- "**/test/pocs/" "**/test/bulwark/" "**/test/formal/" 2>/dev/null || true
 fi
 
 cd "$AUDIT_DIR"
@@ -119,31 +119,19 @@ fi
 echo "→ Installing AI audit skills..."
 /home/auditor/scripts/install-skills.sh
 
-# ── Patch missing remappings ─────────────────────────────────────────
-patch_remapping() {
-    local pkg_dir="$1"
-    local remap_file="$pkg_dir/remappings.txt"
-    [ ! -f "$remap_file" ] && return
-    if ! grep -q "^horizon-test/" "$remap_file" 2>/dev/null; then
-        local test_dir
-        test_dir=$(find "$pkg_dir" -maxdepth 3 -type d -name "test" 2>/dev/null | head -1)
-        if [ -n "$test_dir" ]; then
-            local rel
-            rel=$(realpath --relative-to="$pkg_dir" "$test_dir")
-            echo "horizon-test/=${rel}/" >> "$remap_file"
-        fi
-    fi
-}
-
 # ── Compile contracts ────────────────────────────────────────────────
+# Try forge build from root; if the repo is a monorepo, try each package subdir.
 echo "→ Compiling contracts..."
-if [ -d "packages/horizon" ]; then
-    patch_remapping "packages/horizon"
-    (cd packages/horizon && forge build 2>/dev/null) && echo "  ✓ Horizon compiled" || echo "  ✗ Horizon build failed"
-fi
-if [ -d "packages/subgraph-service" ]; then
-    patch_remapping "packages/subgraph-service"
-    (cd packages/subgraph-service && forge build 2>/dev/null) && echo "  ✓ SubgraphService compiled" || echo "  ✗ SubgraphService build failed"
+if [ -f "foundry.toml" ] || [ -f "forge.config.toml" ]; then
+    forge build 2>/dev/null && echo "  ✓ Compiled" || echo "  ✗ Root build failed (Pass 1 will retry per-package)"
+elif [ -d "packages" ]; then
+    for pkg in packages/*/; do
+        [ -f "${pkg}foundry.toml" ] || continue
+        pkg_name=$(basename "$pkg")
+        (cd "$pkg" && forge build 2>/dev/null) \
+            && echo "  ✓ $pkg_name compiled" \
+            || echo "  ✗ $pkg_name build failed (Pass 1 will retry)"
+    done
 fi
 
 # ── Restore Claude Code settings ────────────────────────────────────
