@@ -24,12 +24,22 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     eprintln!("  Assembling final report...");
 
     let validated = read_json_array(&ctx.workspace.validated_findings());
+    let unverifiable = read_json_array(&ctx.workspace.unverifiable_findings());
     let fuzz_findings = read_json_array(&ctx.workspace.fuzzing_dir().join("fuzzing-findings.json"));
     let formal_findings =
         read_json_array(&ctx.workspace.formal_dir().join("formal-findings.json"));
 
+    if !unverifiable.is_empty() {
+        eprintln!(
+            "  {} {} finding(s) unverifiable due to build failures — included in report with caveat",
+            style("⚠").yellow(),
+            unverifiable.len()
+        );
+    }
+
     let mut all_findings: Vec<Value> = Vec::new();
     all_findings.extend(validated);
+    all_findings.extend(unverifiable);
     all_findings.extend(fuzz_findings);
     all_findings.extend(formal_findings);
 
@@ -366,6 +376,96 @@ fn write_markdown_report(
     writeln!(f)?;
     writeln!(f, "---")?;
     writeln!(f)?;
+
+    // Scope coverage warning — emitted before executive summary so it can't be missed
+    let failed_pkgs: Vec<&str> = json_report
+        .pointer("/recon_summary/failed_packages")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    let missing_contracts: Vec<&str> = json_report
+        .pointer("/recon_summary/missing_core_contracts")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    if !failed_pkgs.is_empty() || !missing_contracts.is_empty() {
+        writeln!(f, "## ⚠ Scope Coverage Warning")?;
+        writeln!(f)?;
+        writeln!(f, "**This report does not cover the full configured scope.**")?;
+        writeln!(f)?;
+        if !failed_pkgs.is_empty() {
+            writeln!(
+                f,
+                "The following packages **failed to compile** and were excluded from all analysis passes:"
+            )?;
+            writeln!(f)?;
+            for pkg in &failed_pkgs {
+                writeln!(f, "- `{pkg}` — build failed (see `recon/build-{pkg}-stderr.txt`)")?;
+            }
+            writeln!(f)?;
+        }
+        if !missing_contracts.is_empty() {
+            writeln!(
+                f,
+                "The following core contracts were **not found in source** and were not analysed by AI agents:"
+            )?;
+            writeln!(f)?;
+            for c in &missing_contracts {
+                writeln!(f, "- `{c}`")?;
+            }
+            writeln!(f)?;
+        }
+        writeln!(
+            f,
+            "> Vulnerabilities in the excluded contracts are **not reflected in this report**. \
+             Fix the build errors and re-run the pipeline for complete coverage."
+        )?;
+        writeln!(f)?;
+        writeln!(f, "---")?;
+        writeln!(f)?;
+    }
+
+    // Unverifiable findings notice — findings that survived fp-check but couldn't get a PoC
+    // due to build failures. They're real candidates, just unproven.
+    let unverifiable_findings: Vec<&Value> = findings
+        .iter()
+        .filter(|f| {
+            f.get("poc_status")
+                .and_then(|v| v.as_str())
+                == Some("unverifiable_build_failure")
+        })
+        .collect();
+
+    if !unverifiable_findings.is_empty() {
+        writeln!(f, "## ⚑ Unverifiable Findings (Build Failure)")?;
+        writeln!(f)?;
+        writeln!(
+            f,
+            "The following findings **could not be proven or disproven** because one or more \
+             packages failed to compile. They survived the false-positive filter and are included \
+             here for manual review. **Do not dismiss these** — fix the build error and re-run \
+             Pass 3 for a definitive verdict."
+        )?;
+        writeln!(f)?;
+        for uv in &unverifiable_findings {
+            let id = uv.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+            let title = uv.get("title").and_then(|v| v.as_str()).unwrap_or("-");
+            let sev = uv.get("severity").and_then(|v| v.as_str()).unwrap_or("-");
+            let reason = uv
+                .get("unverifiable_reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            writeln!(f, "**{id}** ({sev}): {title}")?;
+            if !reason.is_empty() {
+                writeln!(f)?;
+                writeln!(f, "> {reason}")?;
+            }
+            writeln!(f)?;
+        }
+        writeln!(f, "---")?;
+        writeln!(f)?;
+    }
 
     // Executive summary
     writeln!(f, "## Executive Summary")?;

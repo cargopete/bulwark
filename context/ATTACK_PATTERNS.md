@@ -171,3 +171,43 @@ extracts the difference.
 - Minimum delegation amounts — do they prevent economically viable inflation attacks?
 - Direct token transfers to the pool contract — does the accounting handle them?
 - Share price calculation when total shares or total tokens is very small
+
+---
+
+## AP-11: Balance-Delta Self-Reference (Cross-Contract Routing Capture)
+
+**Source**: Immunefi bounty — SubgraphService `paymentsDestination` curation inflation
+
+**Pattern**: A contract measures incoming token flows by taking `balanceBefore` /
+`balanceAfter` differentials of `token.balanceOf(address(this))`. When the *destination*
+address for the preceding transfer is also `address(this)` (i.e. the same contract that
+is measuring the delta), tokens appear to "arrive" that never actually left the contract.
+This inflates the measured receipt, causing the protocol to credit more value than was
+genuinely transferred in.
+
+The destination address is typically user-settable (e.g. via a mapping like
+`paymentsDestination[serviceProvider]`) and defaults to a safe value when unset. The
+vulnerability activates when a contract sets its own address as the destination —
+creating a self-referential payment loop.
+
+**Two conditions must hold simultaneously:**
+1. A contract uses `balanceOf(address(this))` to measure received tokens
+2. The sender's routing variable (destination/recipient) can be set to `address(this)` of the measuring contract
+
+**What to look for**:
+- `balanceOf(address(this))` used to compute `deltaTokens = after - before`
+- Any mapping/variable (`*destination*`, `*recipient*`, `*beneficiary*`) that routes
+  the token transfer and is settable by the entity being paid
+- Cross-contract calls where Contract A measures tokens received from Contract B,
+  but B's routing variable points back at A
+- Default values of routing variables — if unset defaults to `address(this)`, safe;
+  if unset defaults to msg.sender and msg.sender is the measuring contract, vulnerable
+- Functions like `setPaymentsDestination()`, `setFeeRecipient()`, `updateBeneficiary()`
+  that let service providers or data services control where their fees are sent
+
+**Accumulation model**: The extra credited tokens can be used to inflate curation signal,
+stake, or withdrawable balances — calculate the maximum gain per call and multiply by
+the number of times the operation can be repeated before the pool/accounting corrects.
+
+**Recon artefacts**: Check `recon/balance-delta-patterns.json` and
+`recon/routing-variables.json` — Pass 1 flags these automatically.

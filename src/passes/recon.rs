@@ -16,6 +16,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     let mut compile_ok = true;
     let mut compiler_version = String::from("unknown");
+    let mut failed_packages: Vec<String> = Vec::new();
 
     // ── 1.1 Compile contracts ─────────────────────────────────────
     eprintln!("  Compiling contracts...");
@@ -49,6 +50,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let stderr_path = recon_dir.join(format!("build-{pkg_name}-stderr.txt"));
             std::fs::write(&stderr_path, &result.stderr)?;
             compile_ok = false;
+            failed_packages.push(pkg_name.to_string());
         }
     }
 
@@ -158,18 +160,70 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         style("✓").green()
     );
 
-    // ── 1.10 Assemble recon summary ───────────────────────────────
+    // ── 1.10 Scope validation ─────────────────────────────────────
+    eprintln!("  Validating scope coverage...");
+    let scope_val = validate_scope(ctx)?;
+    write_json(&recon_dir.join("scope-validation.json"), &scope_val)?;
+    let missing_contracts: Vec<String> = scope_val
+        .get("missing")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if !missing_contracts.is_empty() {
+        eprintln!(
+            "    {} {} core contract(s) not found in source: {}",
+            style("⚠").yellow(),
+            missing_contracts.len(),
+            missing_contracts.join(", ")
+        );
+    } else {
+        eprintln!("    {} All core contracts found in source", style("✓").green());
+    }
+
+    // ── 1.11 Balance-delta pattern detection ──────────────────────
+    eprintln!("  Scanning for balance-delta patterns...");
+    let balance_delta = detect_balance_delta_patterns(ctx)?;
+    let bd_count = balance_delta.as_array().map_or(0, |a| a.len());
+    write_json(&recon_dir.join("balance-delta-patterns.json"), &balance_delta)?;
+    if bd_count > 0 {
+        eprintln!(
+            "    {} {bd_count} contract(s) use balanceOf(address(this)) differentials — flag for cross-contract routing review",
+            style("⚠").yellow()
+        );
+    } else {
+        eprintln!("    {} No balance-delta patterns found", style("✓").green());
+    }
+
+    // ── 1.12 User-controlled routing variable detection ───────────
+    eprintln!("  Scanning for fund-routing variables...");
+    let routing_vars = detect_routing_variables(ctx)?;
+    let rv_count = routing_vars.as_array().map_or(0, |a| a.len());
+    write_json(&recon_dir.join("routing-variables.json"), &routing_vars)?;
+    if rv_count > 0 {
+        eprintln!(
+            "    {} {rv_count} contract(s) with settable fund-routing variables",
+            style("⚠").yellow()
+        );
+    } else {
+        eprintln!("    {} No mutable fund-routing variables found", style("✓").green());
+    }
+
+    // ── 1.13 Assemble recon summary ───────────────────────────────
     let summary = json!({
         "generated": Utc::now().to_rfc3339(),
         "pass": "recon",
         "contracts_compiled": compile_ok,
         "compiler_version": compiler_version,
+        "failed_packages": failed_packages,
+        "missing_core_contracts": missing_contracts,
         "slither_summary": serde_json::to_value(&slither_summary)?,
         "entry_point_count": func_count,
         "storage_contracts": storage_count,
         "proxy_contracts": proxy_count,
         "math_operations_contracts": math.as_object().map_or(0, |m| m.len()),
         "access_control_modifiers": mod_count,
+        "balance_delta_contracts": bd_count,
+        "routing_variable_contracts": rv_count,
         "artefacts": [
             "recon/entry-points.json",
             "recon/storage-layouts.json",
@@ -180,12 +234,21 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "recon/access-control.json",
             "recon/proxy-mappings.json",
             "recon/pragma-versions.json",
+            "recon/scope-validation.json",
+            "recon/balance-delta-patterns.json",
+            "recon/routing-variables.json",
         ],
     });
     write_json(&ctx.workspace.recon_summary(), &summary)?;
 
+    let missing_warn = if !missing_contracts.is_empty() {
+        format!(", MISSING_CONTRACTS={}", missing_contracts.join(","))
+    } else {
+        String::new()
+    };
+
     Ok(format!(
-        "compiled={compile_ok}, slither={slither_summary}, entry_points={func_count}, proxies={proxy_count}"
+        "compiled={compile_ok}, slither={slither_summary}, entry_points={func_count}, proxies={proxy_count}{missing_warn}"
     ))
 }
 
@@ -742,6 +805,195 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
             Ok("completed (no findings captured)".into())
         }
     }
+}
+
+/// Validate that all core_contracts in config are actually found in compiled source.
+/// Missing contracts indicate a failed build or misconfigured scope — AI agents will
+/// silently skip them without this check.
+fn validate_scope(ctx: &PipelineContext) -> Result<Value> {
+    let mut missing: Vec<String> = Vec::new();
+    let mut found: Vec<Value> = Vec::new();
+
+    for contract in &ctx.config.target.core_contracts {
+        let mut contract_found = false;
+
+        for pkg in &ctx.config.target.scope {
+            let pkg_path = ctx.audit_dir.join(pkg);
+            if find_contract_source(&pkg_path, contract).is_some() {
+                contract_found = true;
+                found.push(json!({
+                    "contract": contract,
+                    "package": pkg,
+                }));
+                break;
+            }
+        }
+
+        if !contract_found {
+            missing.push(contract.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        eprintln!(
+            "    {} Scope gap: the following core contracts are not in source — \
+             AI agents will not analyse them: {}",
+            style("⚠").yellow(),
+            missing.join(", ")
+        );
+    }
+
+    Ok(json!({
+        "found": found,
+        "missing": missing,
+        "complete": missing.is_empty(),
+    }))
+}
+
+/// Detect balance-delta patterns: contracts that measure incoming token flows via
+/// `balanceOf(address(this))` differentials. This pattern is vulnerable to the
+/// self-referential destination bug — if the receiving address equals address(this),
+/// the delta double-counts tokens that merely moved within the contract.
+fn detect_balance_delta_patterns(ctx: &PipelineContext) -> Result<Value> {
+    let mut findings = Vec::new();
+
+    for pkg in &ctx.config.target.scope {
+        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
+        if !contracts_dir.exists() {
+            continue;
+        }
+
+        for sol_file in find_sol_files(&contracts_dir) {
+            let content = std::fs::read_to_string(&sol_file)?;
+            let rel_file = sol_file
+                .strip_prefix(&ctx.audit_dir)
+                .unwrap_or(&sol_file)
+                .to_string_lossy()
+                .to_string();
+
+            let mut occurrences: Vec<Value> = Vec::new();
+
+            for (line_num, line) in content.lines().enumerate() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if trimmed.contains("balanceOf(address(this))") {
+                    occurrences.push(json!({
+                        "line": line_num + 1,
+                        "context": &trimmed[..trimmed.len().min(200)],
+                    }));
+                }
+            }
+
+            if !occurrences.is_empty() {
+                let contract_name = content
+                    .lines()
+                    .find_map(|line| {
+                        let t = line.trim();
+                        t.strip_prefix("contract ")
+                            .map(|rest| rest.split_whitespace().next().unwrap_or("").to_string())
+                    })
+                    .unwrap_or_default();
+
+                findings.push(json!({
+                    "contract": contract_name,
+                    "file": rel_file,
+                    "pattern": "balance_delta",
+                    "description": "Uses balanceOf(address(this)) for differential token measurement. \
+                                    Verify receiving address cannot equal address(this) — \
+                                    self-referential routing inflates the apparent delta.",
+                    "occurrences": occurrences,
+                }));
+            }
+        }
+    }
+
+    Ok(Value::Array(findings))
+}
+
+/// Detect user-settable fund-routing variables: state variables and mappings that determine
+/// where funds are sent (destination, beneficiary, recipient, fee receiver). These variables,
+/// when settable by users, can enable fund capture if set to attacker-controlled addresses
+/// including address(this) in cross-contract flows.
+fn detect_routing_variables(ctx: &PipelineContext) -> Result<Value> {
+    let mut findings = Vec::new();
+
+    let routing_keywords = [
+        "destination", "Destination",
+        "beneficiary", "Beneficiary",
+        "recipient", "Recipient",
+        "feeReceiver", "FeeReceiver",
+        "feeAddress", "FeeAddress",
+        "rewardAddress", "RewardAddress",
+        "withdrawAddress", "WithdrawAddress",
+        "paymentAddress", "PaymentAddress",
+        "paymentsDestination", "feeDest", "payDest",
+    ];
+
+    for pkg in &ctx.config.target.scope {
+        let contracts_dir = ctx.audit_dir.join(pkg).join("contracts");
+        if !contracts_dir.exists() {
+            continue;
+        }
+
+        for sol_file in find_sol_files(&contracts_dir) {
+            let content = std::fs::read_to_string(&sol_file)?;
+            let rel_file = sol_file
+                .strip_prefix(&ctx.audit_dir)
+                .unwrap_or(&sol_file)
+                .to_string_lossy()
+                .to_string();
+
+            let mut variables: Vec<Value> = Vec::new();
+
+            for (line_num, line) in content.lines().enumerate() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+
+                // Only inspect state variable declarations
+                let is_state_decl = trimmed.starts_with("address ")
+                    || trimmed.starts_with("mapping(");
+                if !is_state_decl {
+                    continue;
+                }
+
+                if routing_keywords.iter().any(|kw| trimmed.contains(kw)) {
+                    let is_constant = trimmed.contains("constant") || trimmed.contains("immutable");
+                    variables.push(json!({
+                        "line": line_num + 1,
+                        "context": &trimmed[..trimmed.len().min(200)],
+                        "settable": !is_constant,
+                    }));
+                }
+            }
+
+            if !variables.is_empty() {
+                let contract_name = content
+                    .lines()
+                    .find_map(|line| {
+                        let t = line.trim();
+                        t.strip_prefix("contract ")
+                            .map(|rest| rest.split_whitespace().next().unwrap_or("").to_string())
+                    })
+                    .unwrap_or_default();
+
+                findings.push(json!({
+                    "contract": contract_name,
+                    "file": rel_file,
+                    "pattern": "user_controlled_routing",
+                    "description": "Contains fund-routing state variables. Verify these cannot be \
+                                    set to address(this) or attacker-controlled addresses, \
+                                    and that defaults are safe.",
+                    "variables": variables,
+                }));
+            }
+        }
+    }
+
+    Ok(Value::Array(findings))
 }
 
 fn identify_proxies(ctx: &PipelineContext) -> Result<Value> {

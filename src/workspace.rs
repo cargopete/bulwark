@@ -73,6 +73,10 @@ impl Workspace {
         self.pocs_dir().join("discarded-findings.json")
     }
 
+    pub fn unverifiable_findings(&self) -> PathBuf {
+        self.pocs_dir().join("unverifiable-findings.json")
+    }
+
     pub fn final_report_md(&self) -> PathBuf {
         self.root.join("final-report.md")
     }

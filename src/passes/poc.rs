@@ -72,7 +72,27 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     // Scan test infrastructure
     let test_info = super::scan_test_infrastructure(ctx);
 
+    // Load failed packages from recon summary so we can identify unverifiable findings
+    let failed_packages: Vec<String> = {
+        let recon_summary = ctx.workspace.recon_summary();
+        std::fs::read_to_string(&recon_summary)
+            .ok()
+            .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+            .and_then(|v| v.get("failed_packages").and_then(|p| p.as_array()).cloned())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+
+    if !failed_packages.is_empty() {
+        eprintln!(
+            "  {} Note: {} package(s) failed to build — PoC compile failures may be unverifiable, not false positives",
+            style("⚠").yellow(),
+            failed_packages.len()
+        );
+    }
+
     let mut validated: Vec<Value> = Vec::new();
+    let mut unverifiable: Vec<Value> = Vec::new();
     let mut discarded_ids: Vec<String> = Vec::new();
     let mut stats = PocStats::default();
 
@@ -109,7 +129,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             &poc_status,
             &poc_file,
             ctx,
+            &failed_packages,
             &mut validated,
+            &mut unverifiable,
             &mut discarded_ids,
             &mut stats,
         );
@@ -117,6 +139,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     // Write validated findings
     write_json(&ctx.workspace.validated_findings(), &Value::Array(validated.clone()))?;
+
+    // Write unverifiable findings (PoC couldn't compile due to known build failures)
+    write_json(&ctx.workspace.unverifiable_findings(), &Value::Array(unverifiable.clone()))?;
 
     // Write discarded findings
     let discarded: Vec<&Finding> = findings
@@ -136,21 +161,22 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         &Value::Array(discarded_json),
     )?;
 
-    let survived = stats.validated + stats.inconclusive;
+    let survived = stats.validated + stats.inconclusive + stats.unverifiable;
     eprintln!();
     eprintln!(
-        "  {} Input: {} | Validated: {} | Inconclusive: {} | Discarded: {} | Survived: {}",
+        "  {} Input: {} | Validated: {} | Inconclusive: {} | Unverifiable: {} | Discarded: {} | Survived: {}",
         style("✓").green(),
         findings.len(),
         stats.validated,
         stats.inconclusive,
+        stats.unverifiable,
         stats.discarded,
         survived
     );
 
     Ok(format!(
-        "{survived} survived ({} validated, {} inconclusive, {} discarded)",
-        stats.validated, stats.inconclusive, stats.discarded
+        "{survived} survived ({} validated, {} inconclusive, {} unverifiable, {} discarded)",
+        stats.validated, stats.inconclusive, stats.unverifiable, stats.discarded
     ))
 }
 
@@ -158,6 +184,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 struct PocStats {
     validated: usize,
     inconclusive: usize,
+    unverifiable: usize,
     discarded: usize,
 }
 
@@ -371,7 +398,9 @@ fn apply_validation_gate(
     poc_status: &str,
     poc_file: &Path,
     ctx: &PipelineContext,
+    failed_packages: &[String],
     validated: &mut Vec<Value>,
+    unverifiable: &mut Vec<Value>,
     discarded_ids: &mut Vec<String>,
     stats: &mut PocStats,
 ) {
@@ -382,7 +411,16 @@ fn apply_validation_gate(
         .to_string_lossy()
         .to_string();
 
-    match poc_status {
+    // Reclassify compile failures when we know a package didn't build.
+    // A PoC that can't compile because SubgraphService is missing is NOT the same as
+    // a PoC that can't compile because the exploit logic is wrong.
+    let effective_status = if poc_status == "failed_to_compile" && !failed_packages.is_empty() {
+        "unverifiable_build_failure"
+    } else {
+        poc_status
+    };
+
+    match effective_status {
         "compiles_and_demonstrates" => {
             eprintln!(
                 "    {} VALIDATED — severity preserved ({})",
@@ -390,7 +428,7 @@ fn apply_validation_gate(
                 finding.severity
             );
             finding_json["poc_file"] = json!(rel_poc);
-            finding_json["poc_status"] = json!(poc_status);
+            finding_json["poc_status"] = json!(effective_status);
             validated.push(finding_json);
             stats.validated += 1;
         }
@@ -411,7 +449,7 @@ fn apply_validation_gate(
                 &finding.severity.to_string()
             };
             finding_json["poc_file"] = json!(rel_poc);
-            finding_json["poc_status"] = json!(poc_status);
+            finding_json["poc_status"] = json!(effective_status);
             finding_json["original_severity"] = json!(finding.severity.to_string());
             finding_json["severity"] = json!(capped);
             validated.push(finding_json);
@@ -419,15 +457,31 @@ fn apply_validation_gate(
         }
         "requires_mainnet_simulation" => {
             eprintln!("    {} MAINNET REQUIRED — flagged for manual review", style("⚑").cyan());
-            finding_json["poc_status"] = json!(poc_status);
+            finding_json["poc_status"] = json!(effective_status);
             validated.push(finding_json);
             stats.validated += 1;
+        }
+        "unverifiable_build_failure" => {
+            eprintln!(
+                "    {} UNVERIFIABLE — PoC could not compile due to build failure in: {}",
+                style("⚑").cyan(),
+                failed_packages.join(", ")
+            );
+            eprintln!("      Finding preserved for manual review — fix the build and re-run to get a verdict.");
+            finding_json["poc_status"] = json!("unverifiable_build_failure");
+            finding_json["unverifiable_reason"] = json!(format!(
+                "PoC compilation failed — the following packages did not build and may be required: {}. \
+                 This finding has NOT been disproven. Fix the build error and re-run Pass 3 for a definitive verdict.",
+                failed_packages.join(", ")
+            ));
+            unverifiable.push(finding_json);
+            stats.unverifiable += 1;
         }
         _ => {
             eprintln!(
                 "    {} DISCARDED ({})",
                 style("✗").red(),
-                poc_status
+                effective_status
             );
             discarded_ids.push(finding.id.clone());
             stats.discarded += 1;

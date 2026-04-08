@@ -48,17 +48,49 @@ Focus on these contracts and attack vectors:
 - Operator setting themselves as beneficiary anywhere
 - Cross-data-service operator scope escape (P-20)
 
+## Cross-Contract Flow Analysis
+
+**This is the highest-yield attack surface. Do not skip it.**
+
+Multi-contract interactions produce bugs that single-contract analysis misses entirely.
+The `paymentsDestination` class of bugs (Immunefi $XXX,XXX bounties) lives here.
+
+**Mandatory cross-contract checks:**
+
+1. **Balance-delta self-reference**: Does any contract use `balanceOf(address(this))` to
+   measure incoming tokens? If so, trace what happens when the *recipient* of the preceding
+   transfer is also `address(this)` — the delta counts tokens that never actually arrived.
+   Check `audit-workspace/recon/balance-delta-patterns.json` for the full list.
+
+2. **Fund-routing variable capture**: Mappings like `paymentsDestination[provider]` control
+   where fees go. Ask: who sets this? What is the default? Can it be set to `address(this)`
+   on the paying contract? If destination == payer, funds are "paid" but never leave.
+   Check `audit-workspace/recon/routing-variables.json` for the full list.
+
+3. **Fee distribution cross-contract**: When Contract A calls `distribute(amount)` on
+   Contract B, and B uses a user-supplied address to split fees — trace the full call graph.
+   Does the recipient address affect what B reports back to A?
+
+4. **Callback re-entrancy across contracts**: After a token transfer, does the receiving
+   contract call back into the sender before the sender updates its accounting?
+
+**How to do it**: Pick each entry point in `entry-points.json` and trace it forward through
+ALL contracts it touches. Don't stop at the first contract boundary.
+
 ## Before You Start
 
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
 2. `PROPERTIES.md` — the 22 invariants (your targets to break)
 3. `KNOWN_ISSUES.md` — accepted risks (don't flag KI-1 to KI-4) + focus areas
-4. `ATTACK_PATTERNS.md` — known patterns from previous audits — search for VARIANTS
+4. `ATTACK_PATTERNS.md` — known patterns from previous audits — search for VARIANTS (especially AP-11)
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/slither-results.json` — static analysis results
 7. `audit-workspace/recon/math-operations.json` — arithmetic operations inventory
 8. `audit-workspace/recon/access-control.json` — modifier/role mappings
+9. `audit-workspace/recon/balance-delta-patterns.json` — contracts using balance differentials
+10. `audit-workspace/recon/routing-variables.json` — user-settable fund-routing variables
+11. `audit-workspace/recon/scope-validation.json` — which core contracts were NOT found (coverage gaps)
 
 ## Required Skill Invocations
 
