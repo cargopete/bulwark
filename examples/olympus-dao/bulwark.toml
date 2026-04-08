@@ -1,0 +1,78 @@
+[target]
+repo = "https://github.com/OlympusDAO/olympus-v3"
+branch = "master"
+scope = ["src"]
+core_contracts = [
+    "Kernel",
+    "OlympusTreasury",
+    "OlympusMinter",
+    "OlympusPrice",
+    "OlympusRange",
+    "OlympusRoles",
+    "Cooler",
+    "CoolerFactory",
+    "ClearingHouse",
+    "BondCallback",
+    "Operator",
+    "Heart",
+    "RolesAdmin",
+    "TreasuryCustodian",
+]
+math_sensitive = [
+    "OlympusPrice",
+    "OlympusRange",
+    "Cooler",
+    "ClearingHouse",
+    "BondCallback",
+    "Operator",
+]
+
+model = "sonnet"
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+scv_scan_max_turns = 20
+
+[passes.agents]
+enabled = true
+max_turns = 80
+agents = ["red", "blue", "gold"]
+timeout_minutes = 60
+variant_analysis = true
+variant_max_turns = 15
+
+[passes.poc]
+enabled = true
+max_turns = 30
+max_retries = 2
+fp_check = true
+fp_check_max_turns = 10
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+max_turns = 40
+model = "sonnet"
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+target_properties = []
+max_turns = 30
+model = "sonnet"
+
+[passes.review]
+enabled = true
+max_turns = 60
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"
