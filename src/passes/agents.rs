@@ -46,11 +46,10 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
 
     let max_turns = ctx.config.passes.agents.max_turns;
     let timeout = Duration::from_secs(ctx.config.passes.agents.timeout_minutes * 60);
-    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
 
-    // Verify prompts exist
+    // Verify prompts exist (using project-first resolution)
     for agent in &agents {
-        let prompt_file = prompts_dir.join(format!("{agent}-agent.md"));
+        let prompt_file = ctx.resolve_prompt_path(&format!("{agent}-agent.md"));
         if !prompt_file.exists() {
             return Err(BulwarkError::PrerequisiteNotMet {
                 pass: "agents".into(),
@@ -77,7 +76,6 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         let ctx = ctx.clone();
         let name = agent_name.clone();
         let claude_bin = claude_bin.clone();
-        let prompts_dir = prompts_dir.clone();
         let pb = multi.add(ProgressBar::new_spinner());
         pb.set_style(spinner_style.clone());
         pb.set_prefix(name.to_uppercase());
@@ -85,7 +83,7 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         pb.enable_steady_tick(Duration::from_millis(120));
 
         set.spawn(async move {
-            let result = run_single_agent(&ctx, &name, &claude_bin, &prompts_dir, max_turns).await;
+            let result = run_single_agent(&ctx, &name, &claude_bin, max_turns).await;
             match &result {
                 Ok(count) => pb.finish_with_message(format!("{count} findings")),
                 Err(e) => pb.finish_with_message(format!("failed: {e}")),
@@ -197,10 +195,9 @@ async fn run_single_agent(
     ctx: &PipelineContext,
     agent_name: &str,
     claude_bin: &Path,
-    prompts_dir: &Path,
     max_turns: u32,
 ) -> Result<usize> {
-    let prompt_file = prompts_dir.join(format!("{agent_name}-agent.md"));
+    let prompt_file = ctx.resolve_prompt_path(&format!("{agent_name}-agent.md"));
     let prompt = std::fs::read_to_string(&prompt_file)?;
     let output_file = ctx.workspace.agent_raw_output(agent_name);
     let log_file = ctx.workspace.agent_log(agent_name);

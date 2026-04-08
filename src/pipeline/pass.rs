@@ -8,10 +8,29 @@ pub struct PipelineContext {
     pub config: Config,
     pub workspace: Workspace,
     pub audit_dir: PathBuf,
+    /// Project directory — contains `bulwark.toml`, `context/`, and optional `prompts/` overrides.
     pub bulwark_root: PathBuf,
+    /// Bulwark install directory — contains the built-in generic `prompts/` and `schemas/`.
+    /// Resolved from `$BULWARK_INSTALL` env var; falls back to `bulwark_root`.
+    pub bulwark_install: PathBuf,
 }
 
 impl PipelineContext {
+    /// Resolve a prompt file path.
+    ///
+    /// Checks the project directory (`bulwark_root/prompts/`) first — allowing per-project
+    /// prompt overrides — then falls back to the install directory (`bulwark_install/prompts/`).
+    pub fn resolve_prompt_path(&self, filename: &str) -> PathBuf {
+        let project_path = self
+            .bulwark_root
+            .join(&self.config.prompts.dir)
+            .join(filename);
+        if project_path.exists() {
+            return project_path;
+        }
+        self.bulwark_install.join(&self.config.prompts.dir).join(filename)
+    }
+
     /// Resolve the primary Foundry build directory.
     ///
     /// Tries each scope entry in order, returning the first that exists and

@@ -17,48 +17,42 @@ security property (P-1 through P-22) defined in PROPERTIES.md.
 
 ## Severity Calibration
 
-- **Critical**: Property violation leads to fund loss >10,000 GRT or complete invariant breach
-- **High**: Property violation leads to 1,000-10,000 GRT loss or partial invariant breach
+- **Critical**: Property violation leads to material fund loss or complete invariant breach
+- **High**: Property violation leads to significant loss or partial invariant breach
 - **Medium**: Property holds in normal operation but fails under specific edge cases
 - **Low**: Property holds but the code path is fragile or relies on external assumptions
 
 ## Your Scope
 
-All in-scope contracts, all 22 properties. For each property:
+Read `PROPERTIES.md` — that file defines every security property you must verify.
+Work through them ALL. **Skipping a property is a failure.**
 
-### Staking (P-1 to P-4)
-- P-1: Trace every function that adds/removes GRT from HorizonStaking. Verify conservation.
-- P-2: Verify provision tokens cannot be double-counted across data services.
-- P-3: Find every path to withdrawal. Verify thawing period is checked.
-- P-4: Verify unstake() reverts if tokens are provisioned.
+For each property, apply this methodology:
 
-### Delegation (P-5 to P-9)
-- P-5: Check all paths that modify totalShares/totalTokens. Can shares be >0 with tokens ==0?
-- P-6: Trace share price through delegate/undelegate/slash/collect. When can it decrease?
-- P-7: Verify no fee is taken on delegation entry.
-- P-8: Verify thawing delegations are included in slashable balance.
-- P-9: Test the 100-undelegation cap. What happens at 101?
+### How to verify each property
 
-### Slashing (P-10 to P-13)
-- P-10 [CRITICAL]: Trace slash() line by line. Verify provider stake decreases before any delegation pool reduction.
-- P-11: When delegator tokens are slashed, verify they go to address(0) and not to the reward recipient.
-- P-12: Verify the only valid msg.sender for slash() is the provision's verifier.
-- P-13: Verify slashed_amount == burned + reward with no remainder.
+1. **Identify the enforcement**: which function(s) are supposed to enforce this property?
+2. **Trace all state changes**: find every code path that touches the relevant state variables
+3. **Check cross-contract calls**: if enforcement depends on an external contract, trace into it
+4. **Test edge cases**: zero values, maximum values, concurrent operations, boundary conditions
+5. **Look for bypasses**: is there a code path that skips enforcement?
 
-### Payments (P-14 to P-18)
-- P-14: Can any operation make escrow balance < sum of deposits?
-- P-15: Trace collect() arithmetic. Verify exact conservation (no rounding loss).
-- P-16: Check valueAggregate monotonicity enforcement.
-- P-17: Verify RAV dataService field prevents cross-service collection.
-- P-18: Trace the thaw-then-collect interaction timing.
+### Categories to cover (from PROPERTIES.md)
 
-### Operators (P-19 to P-20)
-- P-19 [CRITICAL]: Enumerate ALL operator-callable functions. For each, verify no token extraction path.
-- P-20: Verify operator authorization is scoped per data service.
+For each category of properties in PROPERTIES.md:
+- **Token conservation**: sum of inputs must equal sum of outputs; no tokens created or destroyed
+- **Access control**: only authorised callers can invoke privileged functions
+- **Ordering invariants**: operations must happen in the correct sequence (e.g. deposit before withdraw)
+- **Arithmetic invariants**: share prices, exchange rates, and pool ratios must behave correctly
+- **Cross-contract invariants**: properties that depend on calls between multiple contracts
 
-### Upgrades (P-21 to P-22)
-- P-21: Run `forge inspect` on core contracts. Verify gap sizes.
-- P-22: Check all proxy contracts for initializer guards.
+### Specific techniques
+
+- For share-based pools: trace token↔share conversions; verify no rounding causes unbounded drift
+- For time-locks: verify the period check is present on EVERY withdrawal path, not just the happy path
+- For access control: run `forge inspect` to enumerate all external/public functions; check each
+- For storage gaps: verify `uint256[N] __gap` declarations account for all used slots in upgradeable contracts
+- For signature verification: confirm chain ID, contract address, and all relevant fields are in the signed payload
 
 ## Before You Start
 

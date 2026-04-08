@@ -5,16 +5,19 @@ services:
       dockerfile: Dockerfile
     container_name: bulwark
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - AUDIT_TARGET=${AUDIT_TARGET:-https://github.com/graphprotocol/contracts.git}
-      - AUDIT_BRANCH=${AUDIT_BRANCH:-main}
-      - AUDIT_SCOPE=${AUDIT_SCOPE:-packages/horizon packages/subgraph-service}
-      - BULWARK_ROOT=/home/auditor
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # BULWARK_ROOT = project dir (bulwark.toml + context/ + optional prompts/ overrides).
+      # Set BULWARK_PROJECT on the host to point at your project directory.
+      # Default: current directory (works when running from inside a project dir).
+      - BULWARK_ROOT=/home/auditor/project
+      # BULWARK_INSTALL = the tool install dir (built-in prompts, schemas, ATTACK_PATTERNS.md).
+      - BULWARK_INSTALL=/home/auditor
     volumes:
+      # Mount the project directory (bulwark.toml + context/ + optional prompts/ overrides).
+      # Set BULWARK_PROJECT=/path/to/your/project on the host, or run from inside the project dir.
+      - ${BULWARK_PROJECT:-.}:/home/auditor/project:ro
       # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
-      # Mount config for easy editing without rebuild
-      - ./bulwark.toml:/home/auditor/bulwark.toml:ro
       # Mount host Claude credentials (login auth only — not the whole .claude dir)
       - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json:ro
       # Reports land here on the host after each run

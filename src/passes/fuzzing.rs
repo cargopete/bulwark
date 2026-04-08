@@ -243,8 +243,7 @@ async fn generate_invariant_tests(
     invariant_dir: &Path,
     logs_dir: &Path,
 ) -> usize {
-    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
-    let prompt_path = prompts_dir.join("invariant-generator.md");
+    let prompt_path = ctx.resolve_prompt_path("invariant-generator.md");
 
     if !prompt_path.exists() || !ctx.config.has_tool("claude") {
         eprintln!("  Claude or prompt not available — skipping test generation");

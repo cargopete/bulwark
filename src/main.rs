@@ -49,14 +49,23 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::load(&config_path)?;
 
-    // Resolve audit directory: CLI flag > env var > config-relative
+    // Resolve audit directory: CLI flag > env var > derive from repo URL in config
     let audit_dir = cli
         .audit_dir
         .or_else(|| std::env::var("AUDIT_DIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| {
-            let bulwark_root = std::env::var("BULWARK_ROOT")
+            let base = std::env::var("BULWARK_ROOT")
                 .unwrap_or_else(|_| "/home/auditor".into());
-            PathBuf::from(bulwark_root).join("audits/graph-contracts")
+            // Derive a name from the repo URL (last path component, strip .git)
+            let repo_name = config
+                .target
+                .repo
+                .trim_end_matches(".git")
+                .rsplit('/')
+                .next()
+                .unwrap_or("audit")
+                .to_string();
+            PathBuf::from(base).join("audits").join(repo_name)
         });
 
     let bulwark_root = std::env::var("BULWARK_ROOT")
@@ -74,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Findings(args) => cmd_findings(config, audit_dir, args)?,
         Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
+        Commands::Init(args) => cmd_init(args)?,
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
     }
@@ -316,12 +326,16 @@ fn cmd_report(
     let bulwark_root = std::env::var("BULWARK_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
+    let bulwark_install = std::env::var("BULWARK_INSTALL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| bulwark_root.clone());
 
     let ctx = pipeline::pass::PipelineContext {
         config,
         workspace: ws,
         audit_dir,
         bulwark_root,
+        bulwark_install,
     };
 
     eprintln!(
@@ -420,6 +434,200 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
     }
 
     eprintln!();
+    Ok(())
+}
+
+fn cmd_init(args: cli::InitArgs) -> anyhow::Result<()> {
+    let path = args.path.canonicalize().unwrap_or(args.path.clone());
+    let repo = args.repo.as_deref().unwrap_or("https://github.com/YOUR-ORG/YOUR-REPO.git");
+
+    // Derive a project name from repo URL
+    let project_name = repo
+        .trim_end_matches(".git")
+        .rsplit('/')
+        .next()
+        .unwrap_or("audit");
+
+    let project_dir = if path == PathBuf::from(".") {
+        std::env::current_dir()?
+    } else {
+        path.clone()
+    };
+
+    std::fs::create_dir_all(project_dir.join("context"))?;
+
+    // bulwark.toml
+    let toml = format!(
+        r#"[target]
+repo = "{repo}"
+branch = "main"
+scope = ["contracts"]
+core_contracts = [
+    # List the main contracts you want AI agents to focus on
+    # e.g. "Vault", "Router", "Pool"
+]
+math_sensitive = [
+    # List contracts with complex arithmetic for extra scrutiny
+]
+
+model = "haiku"
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+scv_scan_max_turns = 20
+
+[passes.agents]
+enabled = true
+max_turns = 80
+agents = ["red", "blue", "gold"]
+timeout_minutes = 60
+variant_analysis = true
+variant_max_turns = 15
+
+[passes.poc]
+enabled = true
+max_turns = 30
+max_retries = 2
+fp_check = true
+fp_check_max_turns = 10
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+max_turns = 40
+model = "sonnet"
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+target_properties = []
+max_turns = 30
+model = "sonnet"
+
+[passes.review]
+enabled = true
+max_turns = 60
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"
+"#,
+    );
+    std::fs::write(project_dir.join("bulwark.toml"), &toml)?;
+
+    // context/AUDIT_CONTEXT.md
+    let audit_context = format!(
+        r#"# {project_name} — Audit Context
+
+## Protocol Overview
+
+TODO: Describe what this protocol does, its purpose, and its main components.
+
+## Architecture
+
+TODO: Describe the contract architecture. Key contracts, how they interact,
+upgrade patterns, and any proxy relationships.
+
+## Trust Model
+
+TODO: Who are the privileged actors? What can they do?
+- **Owner/Admin**: ...
+- **Operators**: ...
+- **Users**: ...
+
+## Attack Surface
+
+TODO: Where is value held? What operations move funds?
+What external dependencies exist (oracles, other protocols)?
+
+## Economic Parameters
+
+TODO: Fee rates, token amounts, pool sizes, minimum/maximum values
+that are relevant to economic attack analysis.
+
+## Known Issues / Accepted Risks
+
+See KNOWN_ISSUES.md.
+"#
+    );
+    std::fs::write(project_dir.join("context").join("AUDIT_CONTEXT.md"), audit_context)?;
+
+    // context/PROPERTIES.md
+    let properties = format!(
+        r#"# {project_name} — Security Properties
+
+These are the invariants the audit pipeline will attempt to verify and violate.
+
+## P-1: [Property Name]
+
+**Informal**: [One sentence describing the property]
+
+**Formal**: [Mathematical or pseudo-code formulation if applicable]
+
+**Enforcement**: [Which function(s) enforce this?]
+
+---
+
+## P-2: [Property Name]
+
+TODO: Add one section per security property.
+
+Properties should be:
+- Specific and verifiable (not vague like "funds are safe")
+- Tied to concrete code paths
+- Testable with Foundry invariant tests or Halmos symbolic tests
+
+---
+
+<!-- Add more properties as P-3, P-4, etc. -->
+"#
+    );
+    std::fs::write(project_dir.join("context").join("PROPERTIES.md"), properties)?;
+
+    // context/KNOWN_ISSUES.md
+    let known_issues = format!(
+        r#"# {project_name} — Known Issues and Accepted Risks
+
+AI agents must NOT flag the following as findings. These are acknowledged risks
+or design decisions accepted by the protocol team.
+
+## KI-1: [Issue Name]
+
+**Description**: TODO
+
+**Accepted because**: TODO
+
+---
+
+<!-- Add more known issues as KI-2, KI-3, etc. -->
+"#
+    );
+    std::fs::write(project_dir.join("context").join("KNOWN_ISSUES.md"), known_issues)?;
+
+    eprintln!("{}", style("✓ Project scaffold created").green().bold());
+    eprintln!();
+    eprintln!("  {}", project_dir.display());
+    eprintln!("  ├── bulwark.toml");
+    eprintln!("  └── context/");
+    eprintln!("      ├── AUDIT_CONTEXT.md");
+    eprintln!("      ├── PROPERTIES.md");
+    eprintln!("      └── KNOWN_ISSUES.md");
+    eprintln!();
+    eprintln!("Next steps:");
+    eprintln!("  1. Edit context/AUDIT_CONTEXT.md  — describe the protocol");
+    eprintln!("  2. Edit context/PROPERTIES.md      — define the invariants to verify");
+    eprintln!("  3. Edit context/KNOWN_ISSUES.md    — list accepted risks");
+    eprintln!("  4. Edit bulwark.toml               — set scope and core_contracts");
+    eprintln!("  5. Run:  BULWARK_PROJECT={} docker compose up", project_dir.display());
+
     Ok(())
 }
 

@@ -51,8 +51,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let forge_bin = ctx.config.resolve_tool("forge")?;
     let max_turns = ctx.config.passes.poc.max_turns;
     let max_retries = ctx.config.passes.poc.max_retries;
-    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
-    let poc_prompt_path = prompts_dir.join("poc-generator.md");
+    let poc_prompt_path = ctx.resolve_prompt_path("poc-generator.md");
 
     if !poc_prompt_path.exists() {
         return Err(BulwarkError::PrerequisiteNotMet {

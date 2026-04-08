@@ -190,8 +190,7 @@ async fn run_adversarial_review(
     review_dir: &Path,
     logs_dir: &Path,
 ) -> Option<Value> {
-    let prompts_dir = ctx.bulwark_root.join(&ctx.config.prompts.dir);
-    let prompt_path = prompts_dir.join("adversarial-reviewer.md");
+    let prompt_path = ctx.resolve_prompt_path("adversarial-reviewer.md");
 
     if !prompt_path.exists() || !ctx.config.has_tool("claude") {
         eprintln!(

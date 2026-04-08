@@ -20,68 +20,56 @@ Z operations at gas cost W" IS a finding.**
 ## Severity Calibration
 
 Based on economic impact with gas costs factored in:
-- **Critical**: Net profit >10,000 GRT achievable in practice (gas included)
-- **High**: Net profit 1,000-10,000 GRT, or share price manipulation >1%
-- **Medium**: Net profit 100-1,000 GRT, or rounding drift >0.01% per 10,000 operations
+- **Critical**: Net profit >1% of protocol TVL achievable in practice (gas included)
+- **High**: Net profit 0.1–1% of TVL, or share/exchange price manipulation >1%
+- **Medium**: Profitable at scale (>10,000 operations), or rounding drift >0.01% per 10,000 ops
 - **Low**: Theoretical rounding concern, gas-unprofitable at any scale — skip these
 - **Informational**: Skip entirely. You earn nothing.
 
 ## Your Scope
 
-### 1. Delegation Pool Math (PRIMARY TARGET)
+Read `AUDIT_CONTEXT.md` for the economic parameters: fee rates, pool mechanics, token amounts,
+and where arithmetic is performed.
+Read `PROPERTIES.md` for the economic invariants you must verify.
 
-Location: HorizonStaking delegation functions + any library they use
+### 1. Share / Pool Math (PRIMARY TARGET)
 
-**Analyse every arithmetic operation in:**
-- `tokensToShares()` / `sharesToTokens()` (or equivalent conversion functions)
-- `delegate()` — how many shares minted for deposited tokens
-- `undelegate()` — how many tokens returned for burned shares
-- Any fee distribution that adds tokens to delegation pools
+Find the token↔share conversion functions (whatever they are called in this protocol).
 
 **For each division operation:**
-- What is the rounding direction? (round down, round up, or truncate)
-- Who benefits from the rounding? (protocol or user)
-- What is the maximum rounding error per operation in wei?
+- Rounding direction: truncate_down / round_up
+- Who benefits: protocol or user
+- Maximum error per operation in wei
 - Model accumulation:
-  - 1,000 operations: total drift in GRT
-  - 10,000 operations: total drift in GRT
-  - 100,000 operations: total drift in GRT
-  - Gas cost per operation on Arbitrum (use 0.1 gwei gas price, ~50K gas per delegate)
-  - **Net profitability**: drift minus gas costs
+  - 1,000 operations: total drift in native tokens
+  - 10,000 operations: total drift
+  - 100,000 operations: total drift
+  - Gas cost per operation (use current L2 gas price)
+  - **Net profitability**: drift minus gas
 
-**First-depositor attack:**
-- Can the first delegator manipulate share price via donation?
-- What is the minimum delegation amount?
-- Model: deposit 1 wei, donate 1000 GRT, subsequent delegators lose X%
+**First-depositor / pool inflation attack:**
+- Can the first depositor manipulate the share price via a direct token donation?
+- What minimum deposit amount is enforced?
+- Model: deposit 1 wei → donate large amount → subsequent depositors lose X%
 
-### 2. GraphPayments Fee Distribution
+### 2. Fee Distribution
 
-Location: GraphPayments.collect()
+Find the fee split function (collect, distribute, or equivalent). Verify:
+- Sum of all outputs equals total input (conservation — check the relevant property in PROPERTIES.md)
+- Division order does not create a remainder that vanishes
+- Model: for a small payment with realistic fee percentages, what is the split in wei?
 
-- Trace the fee split: protocolTax + dataServiceCut + delegationCut + receiverAmount
-- Verify exact conservation (P-15): sum must equal total with zero remainder
-- Check: does the order of division operations matter? (it does if truncation occurs)
-- Model: for a 1 GRT payment with 1% protocol tax, 10% data service cut, 10% delegation cut — what is the actual split in wei? Is there remainder?
-
-### 3. PaymentsEscrow Economics
+### 3. Payment / Escrow Economics
 
 - Can a payer profit by timing thaw/deposit/collect sequences?
-- Flash loan attack: borrow GRT, deposit to escrow, manipulate something, withdraw
+- Flash loan: borrow tokens, deposit, manipulate something, withdraw — net profitable?
 - Escrow solvency under concurrent operations
 
-### 4. Reward Distribution
+### 4. MEV and Front-Running
 
-Location: RewardsManager
-
-- Inflationary reward issuance math
-- Reward distribution across indexers — rounding direction
-- Can accumulated rounding in reward distribution exceed dust amounts over time?
-
-### 5. MEV and Front-Running
-
-- Delegation sandwich: front-run a large delegation with your own to capture share price benefit
-- Slash front-running: see pending slash, undelegate to reduce exposure (check P-8)
-- Collection front-running: front-run a collect() to change fee distribution state
+- Sandwich a large deposit/delegation: front-run with your own to capture price benefit
+- Front-run a slash or liquidation to reduce exposure
+- Front-run a fee collection to change the distribution state
 
 ## Before You Start
 

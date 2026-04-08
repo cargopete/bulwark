@@ -15,38 +15,44 @@ that steal funds, manipulate prices, or break protocol invariants for financial 
 
 ## Severity Calibration
 
-Use these concrete thresholds:
-- **Critical**: Can drain a pool, steal >10,000 GRT, or bypass slashing entirely
-- **High**: Can extract 1,000-10,000 GRT, manipulate share prices >1%, or escalate privileges
-- **Medium**: Can extract 100-1,000 GRT, cause incorrect accounting, or create griefing vectors
-- **Low**: Theoretical concern with no practical exploit path, or <100 GRT at risk
+Use these concrete thresholds (in the protocol's native token or USD equivalent):
+- **Critical**: Can drain a pool, steal >1% of protocol TVL, or bypass a core security mechanism entirely
+- **High**: Can extract significant value (0.1–1% of TVL), manipulate share/exchange prices >1%, or escalate privileges
+- **Medium**: Can extract smaller value, cause incorrect accounting, or create griefing vectors
+- **Low**: Theoretical concern with no practical exploit path or negligible profit
 - **Informational**: Code quality, gas, style — you earn nothing for these. Skip them.
 
 ## Your Scope
 
-Focus on these contracts and attack vectors:
+Read `AUDIT_CONTEXT.md` for the full protocol description, architecture, and trust model.
+Read `PROPERTIES.md` for the specific invariants you must break — these are your bounty targets.
 
-### HorizonStaking — Slashing & Delegation
-- Front-running slash via thaw: can a provider see a slash tx and call thaw() first?
-- Flash loan share manipulation: borrow GRT, delegate, manipulate share price, undelegate, profit
-- Accumulated rounding via delegate/undelegate cycling (the $290K bounty area)
-- Concurrent slashes in the same block
-- Slash amount exactly equal to provider stake (boundary condition)
+Core attack vectors to investigate for ANY protocol (adapt to this one from AUDIT_CONTEXT.md):
 
-### PaymentsEscrow — Thaw-Collect Races
-- Payer thaws while collector tries to collect — who wins?
-- Re-deposit after thaw initiation to reset thaw timer
-- Partial collection during thawing window
+### Fund Extraction
+- Can any function transfer tokens to an attacker-controlled address?
+- Are there withdrawal paths that bypass time-locks, access control, or accounting checks?
+- Can a privileged operation (operator, manager, admin) be used to redirect funds?
 
-### GraphTallyCollector — RAV Exploitation
-- RAV replay across data services (P-17 violation)
-- Forged or manipulated valueAggregate
-- Cross-chain RAV replay (check chainID in signature domain)
+### Arithmetic Manipulation
+- Find every division operation — what is the rounding direction, and who benefits?
+- Delegate/deposit cycling: can rounding accumulation be profitable at scale?
+- First-depositor share inflation: deposit dust, donate large amount, drain subsequent depositors
 
-### Operator Escalation
-- Find ANY sequence of operator-callable functions that extracts value (P-19)
-- Operator setting themselves as beneficiary anywhere
-- Cross-data-service operator scope escape (P-20)
+### Cross-Contract Routing Capture (AP-11)
+- Does any contract use `balanceOf(address(this))` to measure incoming tokens?
+- Are fund-routing variables (destination, recipient, beneficiary) user-settable?
+- Can a routing variable be set to `address(this)` of the paying contract, causing a self-referential loop?
+
+### Access Control & Privilege Escalation
+- Enumerate ALL functions callable by operators, managers, or other privileged roles
+- Can any such function extract value, redirect rewards, or set themselves as beneficiary?
+- Can privilege be escalated through a sequence of individually-safe calls?
+
+### Race Conditions & MEV
+- Front-running: can an attacker observe a pending tx and submit a cheaper tx to change outcome?
+- Thaw/unlock races: what happens when two conflicting operations execute in the same block?
+- Flash loans: can pool state be manipulated within a single transaction for profit?
 
 ## Cross-Contract Flow Analysis
 

@@ -27,12 +27,19 @@ impl Orchestrator {
     ) -> Result<Self> {
         let workspace = Workspace::new(&audit_dir, &config.workspace.path);
 
+        // BULWARK_INSTALL points to the generic install dir (baked-in prompts/schemas/context).
+        // Falls back to bulwark_root so single-directory setups keep working.
+        let bulwark_install = std::env::var("BULWARK_INSTALL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| bulwark_root.clone());
+
         Ok(Self {
             ctx: PipelineContext {
                 config,
                 workspace,
                 audit_dir,
                 bulwark_root,
+                bulwark_install,
             },
             start_pass: start,
             end_pass: end,
@@ -44,6 +51,7 @@ impl Orchestrator {
         self.print_banner();
         self.preflight()?;
         self.ctx.workspace.init()?;
+        self.stage_context_files();
 
         let status_file = self.ctx.workspace.pipeline_status_file();
         let mut status = PipelineStatus::load(&status_file)?;
@@ -239,6 +247,51 @@ impl Orchestrator {
             PassNumber::Fuzzing => passes.fuzzing.enabled,
             PassNumber::Formal => passes.formal.enabled,
             PassNumber::Review => passes.review.enabled,
+        }
+    }
+
+    /// Copy context files into audit_dir so Claude agents can read them.
+    ///
+    /// Resolution order (first match wins):
+    /// 1. Already present in audit_dir (from a previous run or manual placement)
+    /// 2. Project context dir: `bulwark_root/context/`
+    /// 3. Install context dir: `bulwark_install/context/`
+    ///
+    /// `ATTACK_PATTERNS.md` always comes from the install dir — it's accumulated generic
+    /// knowledge that shouldn't be overridden per-project.
+    fn stage_context_files(&self) {
+        let project_ctx = self.ctx.bulwark_root.join("context");
+        let install_ctx = self.ctx.bulwark_install.join("context");
+
+        let files = [
+            ("AUDIT_CONTEXT.md", false),
+            ("PROPERTIES.md", false),
+            ("KNOWN_ISSUES.md", false),
+            ("ATTACK_PATTERNS.md", true), // always from install
+        ];
+
+        for (filename, install_only) in &files {
+            let dest = self.ctx.audit_dir.join(filename);
+            if dest.exists() {
+                continue; // already in place
+            }
+
+            if !install_only {
+                let project_file = project_ctx.join(filename);
+                if project_file.exists() {
+                    if std::fs::copy(&project_file, &dest).is_ok() {
+                        debug!("staged {filename} from project context");
+                        continue;
+                    }
+                }
+            }
+
+            let install_file = install_ctx.join(filename);
+            if install_file.exists() {
+                if std::fs::copy(&install_file, &dest).is_ok() {
+                    debug!("staged {filename} from install context");
+                }
+            }
         }
     }
 

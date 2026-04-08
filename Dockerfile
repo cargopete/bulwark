@@ -125,6 +125,9 @@ RUN chmod +x /home/auditor/scripts/*.sh \
     && chmod +x /home/auditor/pipeline/*.sh \
     && chmod +x /home/auditor/pipeline/lib/*.sh
 
+# BULWARK_INSTALL = the tool install dir (generic prompts, schemas, ATTACK_PATTERNS.md).
+# BULWARK_ROOT is overridden at runtime by docker-compose to point at the mounted project dir.
+ENV BULWARK_INSTALL="/home/auditor"
 ENV BULWARK_ROOT="/home/auditor"
 ENV BULWARK_CONTAINER="1"
 

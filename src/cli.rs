@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "bulwark",
-    about = "Multi-pass smart contract audit pipeline for The Graph Protocol",
+    about = "Multi-pass smart contract audit pipeline",
     version
 )]
 pub struct Cli {
@@ -36,6 +36,9 @@ pub enum Commands {
 
     /// Generate final report from existing workspace
     Report(ReportArgs),
+
+    /// Initialise a new project directory scaffold
+    Init(InitArgs),
 
     /// Show tool availability and configuration
     Doctor,
@@ -89,6 +92,17 @@ pub struct ReportArgs {
     /// Output format
     #[arg(long, default_value = "markdown")]
     pub format: String,
+}
+
+#[derive(clap::Args)]
+pub struct InitArgs {
+    /// Directory to create the project in (defaults to current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Git repository URL to audit
+    #[arg(long)]
+    pub repo: Option<String>,
 }
 
 #[derive(Clone, Debug)]
