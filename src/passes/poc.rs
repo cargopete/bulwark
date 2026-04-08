@@ -617,13 +617,24 @@ async fn run_fp_check_filter(
         let log_file = logs_dir.join(format!("{}-fp-check.log", finding.id));
 
         let prompt = format!(
-            "Run /tob-fp-check to challenge this finding. \
-             Be adversarial — try to prove it is a false positive.\n\n\
+            "Run /tob-fp-check on this finding.\n\n\
              ```json\n{finding_json}\n```\n\n\
-             After analysis, respond with ONLY one of these verdicts on a single line:\n\
-             - CONFIRMED: <one-sentence reason>\n\
-             - FALSE_POSITIVE: <one-sentence reason>\n\
-             - UNCERTAIN: <one-sentence reason>"
+             Your job is to verify whether the vulnerable code path described could \
+             plausibly exist and be reachable. Read the relevant source files before deciding.\n\n\
+             Verdict rules — be conservative about calling FALSE_POSITIVE:\n\
+             - CONFIRMED: the vulnerable code pattern exists in source and the attack path \
+               is plausible given the access control.\n\
+             - FALSE_POSITIVE: you have found CONCRETE code evidence that the attack \
+               is impossible — e.g. the function does not exist, a require() definitively \
+               blocks the path, or the math is provably safe by inspection. Do NOT use \
+               this verdict merely because you cannot immediately construct a PoC — that \
+               is what Pass 3 is for.\n\
+             - UNCERTAIN: the code is complex, ambiguous, or you cannot determine \
+               reachability within your turn budget. Default to this when in doubt.\n\n\
+             Respond with ONLY one verdict on a single line:\n\
+             CONFIRMED: <one-sentence reason>\n\
+             FALSE_POSITIVE: <one-sentence reason>\n\
+             UNCERTAIN: <one-sentence reason>"
         );
 
         let session = ClaudeSession {

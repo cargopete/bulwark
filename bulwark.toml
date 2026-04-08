@@ -42,7 +42,7 @@ enabled = true
 max_turns = 30
 max_retries = 2
 fp_check = true              # Pre-filter findings with false-positive check
-fp_check_max_turns = 10
+fp_check_max_turns = 15
 
 [passes.fuzzing]
 enabled = true

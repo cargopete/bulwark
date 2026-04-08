@@ -365,7 +365,7 @@ fn default_variant_turns() -> u32 {
     15
 }
 fn default_fp_check_turns() -> u32 {
-    10
+    15
 }
 fn default_model() -> String {
     "haiku".into()
@@ -531,6 +531,6 @@ core_contracts = ["Test"]
         assert!(config.passes.agents.variant_analysis);
         assert_eq!(config.passes.agents.variant_max_turns, 15);
         assert!(config.passes.poc.fp_check);
-        assert_eq!(config.passes.poc.fp_check_max_turns, 10);
+        assert_eq!(config.passes.poc.fp_check_max_turns, 15);
     }
 }
