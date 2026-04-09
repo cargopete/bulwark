@@ -76,7 +76,11 @@ cd "$AUDIT_DIR"
 # ── Install dependencies ────────────────────────────────────────────
 echo "→ Installing contract dependencies..."
 if [ -f "package.json" ]; then
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+    # Disable interactive git prompts so SSH/HTTPS git deps fail fast rather than blocking.
+    # Linting plugins (solhint etc.) are irrelevant for auditing — failure here is non-fatal.
+    GIT_TERMINAL_PROMPT=0 pnpm install --prod 2>/dev/null \
+        || GIT_TERMINAL_PROMPT=0 pnpm install --prod --ignore-scripts 2>/dev/null \
+        || echo "  ⚠ pnpm install failed (non-fatal — forge/vyper compilation proceeds without node_modules)"
 fi
 
 # ── Stage context files ─────────────────────────────────────────────
@@ -122,13 +126,15 @@ echo "→ Installing AI audit skills..."
 # ── Compile contracts ────────────────────────────────────────────────
 # Try forge build from root; if the repo is a monorepo, try each package subdir.
 echo "→ Compiling contracts..."
+# FOUNDRY_EVM_VERSION=cancun ensures Vyper 0.3.x contracts compile — Vyper does not support
+# the 'prague' EVM target that newer Foundry versions default to. Cancun is current mainnet.
 if [ -f "foundry.toml" ] || [ -f "forge.config.toml" ]; then
-    forge build 2>/dev/null && echo "  ✓ Compiled" || echo "  ✗ Root build failed (Pass 1 will retry per-package)"
+    FOUNDRY_EVM_VERSION=cancun forge build 2>/dev/null && echo "  ✓ Compiled" || echo "  ✗ Root build failed (Pass 1 will retry per-package)"
 elif [ -d "packages" ]; then
     for pkg in packages/*/; do
         [ -f "${pkg}foundry.toml" ] || continue
         pkg_name=$(basename "$pkg")
-        (cd "$pkg" && forge build 2>/dev/null) \
+        (cd "$pkg" && FOUNDRY_EVM_VERSION=cancun forge build 2>/dev/null) \
             && echo "  ✓ $pkg_name compiled" \
             || echo "  ✗ $pkg_name build failed (Pass 1 will retry)"
     done
