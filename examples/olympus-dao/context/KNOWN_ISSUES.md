@@ -29,7 +29,7 @@
 - The `Kernel.executeAction()` function handles 5 action types: `InstallModule`, `UpgradeModule`,
   `ActivatePolicy`, `DeactivatePolicy`, `ChangeExecutor`. Focus on edge cases around
   `UpgradeModule` — it is the most complex and least tested transition.
-- `ClearingHouse` holds a large DAI balance earmarked for Cooler loans. It is the largest
+- `MonoCooler` holds a large DAI balance earmarked for Cooler loans. It is the largest
   single-contract fund concentration outside the core TRSRY.
 - Cross-chain deployments have identical bytecode but different oracle feeds; a PRICE bug
   might be unexploitable on mainnet but exploitable on a thin-liquidity chain.

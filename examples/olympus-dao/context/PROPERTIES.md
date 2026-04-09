@@ -5,7 +5,7 @@
 - **P-01**: `totalDebt[token] ≤ reserveBalance[token]` — debt can never exceed reserves held.
 - **P-02**: Only addresses holding the `withdrawer` role (via ROLES) can call `withdrawReserves()`.
 - **P-03**: `withdrawReserves(token, to, amount)` must reduce `reserveBalance[token]` by exactly `amount`.
-- **P-04**: `getLoan()/repayLoan()` in ClearingHouse must never allow net asset extraction from TRSRY across a round-trip.
+- **P-04**: `getLoan()/repayLoan()` in MonoCooler must never allow net asset extraction from TRSRY across a round-trip.
 
 ## Minter (MINTR)
 
@@ -43,8 +43,8 @@
 - **P-21**: After `claimDefaulted(loanId)`, the collateral released to the lender must equal exactly `loan.collateral` — no more, no less.
 - **P-22**: `repayLoan(loanId, repaid)` must reduce `loan.amount` by `repaid / loan.request.interest`-adjusted principal, never by more than outstanding.
 - **P-23**: A borrower cannot receive their collateral back before fully repaying the loan amount plus accrued interest.
-- **P-24**: `ClearingHouse.lendToCooler()` must only lend up to `FUND_AMOUNT` and must record a corresponding receivable in TRSRY (`addReceivables`).
-- **P-25**: Total outstanding ClearingHouse receivables must not exceed the DAI held in the ClearingHouse fund.
+- **P-24**: `MonoCooler.lendToCooler()` must only lend up to `FUND_AMOUNT` and must record a corresponding receivable in TRSRY (`addReceivables`).
+- **P-25**: Total outstanding MonoCooler receivables must not exceed the DAI held in the MonoCooler fund.
 
 ## BondCallback
 

@@ -43,7 +43,7 @@ and approve/revoke policies. **Module upgrades are live and race-condition-prone
 |----------|------|
 | Cooler | Per-user lending vault — gOHM collateral, DAI/USDC loans |
 | CoolerFactory | Deploys Cooler instances |
-| ClearingHouse | Protocol-side liquidity provider for Cooler loans; holds DAI in TRSRY |
+| MonoCooler | Successor to ClearingHouse — protocol-side singleton lending vault; holds USDS; `treasuryBorrower` routes fund flows |
 
 ## Trust Model
 
@@ -51,7 +51,7 @@ and approve/revoke policies. **Module upgrades are live and race-condition-prone
 - **guardian (ROLES)**: Can deactivate Operator emergency.
 - **policy (ROLES)**: Operator, Heart, BondCallback — can call sensitive module functions.
 - **heart (ROLES)**: Beats the Heart keeper.
-- **cooler_overseer (ROLES)**: Can rebalance ClearingHouse, defund it.
+- **cooler_overseer (ROLES)**: Can rebalance MonoCooler, defund it.
 - **Users**: Interact with Cooler directly. No trusted role.
 
 **Critical invariant**: Only the kernel executor can grant module install/upgrade. A policy that
@@ -71,10 +71,14 @@ gains executor-equivalent power breaks the entire system.
    can be stuffed or the moving average manipulated cheaply, RBS decisions are corrupted.
    Operator executes large swaps based on PRICE output — wrong price → drained reserves.
 
-4. **Cooler liquidation math** — `Cooler.repayLoan()`, `claimDefaulted()`. Incorrect collateral
+4. **MonoCooler `treasuryBorrower` initialisation** — `setTreasuryBorrower()` only enforces
+   admin role if `treasuryBorrower != address(0)`. First call is permissionless — race between
+   deployment and initialisation lets attacker inject a malicious borrower, redirecting all USDS.
+
+5. **Cooler liquidation math** — `Cooler.repayLoan()`, `claimDefaulted()`. Incorrect collateral
    accounting allows under-collateralised loans or collateral theft.
 
-5. **Module upgrade race condition** — during `Kernel._upgradeModule()`, the old module is
+6. **Module upgrade race condition** — during `Kernel._upgradeModule()`, the old module is
    deactivated and new one installed. If a policy holds stale module references, the window
    between deactivation and re-permissioning is exploitable.
 

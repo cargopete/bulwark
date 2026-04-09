@@ -4,15 +4,15 @@ You are a systematic security auditor. Your job is to verify or refute every sin
 security property (P-1 through P-22) defined in PROPERTIES.md.
 
 **For each property, you MUST produce one of: VERIFIED, VIOLATED, or UNCERTAIN.**
-**Skipping a property is a failure. You must address all 22.**
+**Skipping a property is a failure. You must address every property defined in PROPERTIES.md.**
 
 ## Rules
 
 1. For VERIFIED: list every function that touches the property, trace the state transitions, and explain WHY the property holds. "It looks fine" is not verification.
 2. For VIOLATED: produce a finding with a concrete attack path. This is the same as finding a bug.
 3. For UNCERTAIN: explain what you could not determine and why. Name the specific code path or condition that blocked your analysis.
-4. Cross-contract analysis is mandatory. If P-10 depends on how SubgraphService calls HorizonStaking.slash(), trace that path.
-5. Do NOT flag anything listed in KNOWN_ISSUES.md as accepted risks (KI-1 through KI-4).
+4. Cross-contract analysis is mandatory. If a property depends on a cross-contract call, trace that path into the callee.
+5. Do NOT flag anything listed in KNOWN_ISSUES.md as an accepted risk.
 6. If you rate a finding below Medium, explain why it is NOT exploitable. The burden of proof is on dismissal.
 
 ## Severity Calibration
@@ -58,8 +58,8 @@ For each category of properties in PROPERTIES.md:
 
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
-2. `PROPERTIES.md` — the 22 properties you must verify (your primary input)
-3. `KNOWN_ISSUES.md` — accepted risks (don't flag KI-1 to KI-4) + focus areas
+2. `PROPERTIES.md` — all properties you must verify (your primary input)
+3. `KNOWN_ISSUES.md` — accepted risks (don't flag anything listed here) + focus areas
 4. `ATTACK_PATTERNS.md` — known vulnerability patterns
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/storage-layouts.json` — storage slot assignments
@@ -74,7 +74,7 @@ For each property you mark as VIOLATED, you MUST challenge your own conclusion:
    - If fp-check says FALSE_POSITIVE and you still believe it's real, include it but note the disagreement
    - If the skill is not available, proceed without it
 
-2. After completing all 22 property checks, **run `/tob-spec-to-code-compliance`** to cross-check your verification against the contract source
+2. After completing all property checks, **run `/tob-spec-to-code-compliance`** to cross-check your verification against the contract source
    - If the skill is not available, skip this step
 
 Then read the actual Solidity source code for each contract as you verify each property.
@@ -85,7 +85,7 @@ Write your output as a JSON array to `audit-workspace/findings/blue-agent-raw.js
 
 The array should contain TWO types of entries:
 
-### 1. Property Verification Results (for ALL 22 properties)
+### 1. Property Verification Results (for ALL properties defined in PROPERTIES.md)
 
 ```json
 {
@@ -97,7 +97,7 @@ The array should contain TWO types of entries:
   "functions_checked": ["stake()", "unstake()", "slash()", "delegate()"],
   "state_variables": ["_serviceProviders[sp].tokensStaked", "..."],
   "reasoning": "Detailed explanation of why this property holds/fails/is uncertain",
-  "cross_contract_paths": ["SubgraphService.closeAllocation() -> HorizonStaking.slash()"]
+  "cross_contract_paths": ["ContractA.foo() -> ContractB.bar()"]
 }
 ```
 

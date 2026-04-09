@@ -1,5 +1,5 @@
 use crate::error::{BulwarkError, Result};
-use crate::findings::{Finding, Severity};
+use crate::findings::Finding;
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::{self, ClaudeSession};
 use console::style;
@@ -432,25 +432,17 @@ fn apply_validation_gate(
             stats.validated += 1;
         }
         "compiles_but_inconclusive" => {
-            let capped = if matches!(finding.severity, Severity::Critical | Severity::High) {
-                eprintln!(
-                    "    {} INCONCLUSIVE — severity capped: {} -> Medium",
-                    style("~").yellow(),
-                    finding.severity
-                );
-                "Medium"
-            } else {
-                eprintln!(
-                    "    {} INCONCLUSIVE — severity preserved ({})",
-                    style("~").yellow(),
-                    finding.severity
-                );
-                &finding.severity.to_string()
-            };
+            // Preserve original severity — inconclusive means we couldn't prove it,
+            // not that it's wrong. The adversarial reviewer (Pass 6) can downgrade
+            // if it finds a concrete reason. Silently capping Critical→Medium here
+            // caused genuine findings to be underreported.
+            eprintln!(
+                "    {} INCONCLUSIVE — severity preserved ({})",
+                style("~").yellow(),
+                finding.severity
+            );
             finding_json["poc_file"] = json!(rel_poc);
             finding_json["poc_status"] = json!(effective_status);
-            finding_json["original_severity"] = json!(finding.severity.to_string());
-            finding_json["severity"] = json!(capped);
             validated.push(finding_json);
             stats.inconclusive += 1;
         }

@@ -11,7 +11,7 @@ core_contracts = [
     "OlympusRoles",
     "Cooler",
     "CoolerFactory",
-    "ClearingHouse",
+    "MonoCooler",
     "BondCallback",
     "Operator",
     "Heart",
@@ -22,7 +22,7 @@ math_sensitive = [
     "OlympusPrice",
     "OlympusRange",
     "Cooler",
-    "ClearingHouse",
+    "MonoCooler",
     "BondCallback",
     "Operator",
 ]
