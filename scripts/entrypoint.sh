@@ -93,12 +93,12 @@ stage_context_file() {
     local install_only="${2:-false}"
     local dest="$AUDIT_DIR/$filename"
 
-    [ -f "$dest" ] && return  # already in place
-
+    # Project context always overwrites — stale files from previous runs on different
+    # targets must not persist. ATTACK_PATTERNS.md is install-only (generic knowledge).
     if [ "$install_only" = "false" ] && [ -f "/home/auditor/project/context/$filename" ]; then
         cp "/home/auditor/project/context/$filename" "$dest"
         echo "  ✓ $filename (from project)"
-    elif [ -f "/home/auditor/context/$filename" ]; then
+    elif [ ! -f "$dest" ] && [ -f "/home/auditor/context/$filename" ]; then
         cp "/home/auditor/context/$filename" "$dest"
         echo "  ✓ $filename (from install)"
     fi

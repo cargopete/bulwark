@@ -272,10 +272,9 @@ impl Orchestrator {
 
         for (filename, install_only) in &files {
             let dest = self.ctx.audit_dir.join(filename);
-            if dest.exists() {
-                continue; // already in place
-            }
 
+            // Project context always overwrites — stale files from a previous run on a
+            // different target must not persist across runs on the same volume.
             if !install_only {
                 let project_file = project_ctx.join(filename);
                 if project_file.exists() {
@@ -286,10 +285,13 @@ impl Orchestrator {
                 }
             }
 
-            let install_file = install_ctx.join(filename);
-            if install_file.exists() {
-                if std::fs::copy(&install_file, &dest).is_ok() {
-                    debug!("staged {filename} from install context");
+            // Install context only fills in if the file isn't already present.
+            if !dest.exists() {
+                let install_file = install_ctx.join(filename);
+                if install_file.exists() {
+                    if std::fs::copy(&install_file, &dest).is_ok() {
+                        debug!("staged {filename} from install context");
+                    }
                 }
             }
         }
