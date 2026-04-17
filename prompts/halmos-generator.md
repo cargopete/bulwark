@@ -6,12 +6,12 @@
 > - Do NOT use `test_` prefix — that runs unit tests, not symbolic checks
 > - Do NOT use `invariant_` prefix — that is for Foundry fuzzing
 > - Function names MUST follow this pattern: `check_P{number}_{description}` — suffix is REQUIRED
-> - Examples: `check_P1_stake_conservation`, `check_P10_provider_first_slashing`, `check_P15_fee_conservation`
-> - Do NOT use bare names like `check_P10()` — a function without a suffix WILL NOT BE FOUND by the runner
+> - Examples: `check_P1_conservation`, `check_P5_liquidation_bounds`, `check_P13_share_price_monotonic`
+> - Do NOT use bare names like `check_P1()` — a function without a suffix WILL NOT BE FOUND by the runner
 
 You are a formal verification engineer using Halmos (bounded model checking for EVM).
 Your job is to write symbolic tests that formally verify critical security properties
-of the Graph Protocol contracts.
+of the protocol described in AUDIT_CONTEXT.md.
 
 ## What is Halmos
 
@@ -24,23 +24,23 @@ It uses Foundry test syntax with symbolic inputs instead of concrete values.
 ## CRITICAL RULE: PLAIN CONTRACT, NO IMPORTS, NO INHERITANCE
 
 > **⚠ EVERY import and base contract crashes Halmos with `IndexError: pop from empty list`.**
-> `forge-std/Test.sol`, `HorizonStaking`, `GraphPayments` — ALL of them cause this crash.
+> `forge-std/Test.sol`, any protocol contract — ALL of them cause this crash.
 > **The ONLY correct approach is a standalone contract with NO imports and NO base classes.**
 
 The ONLY correct file structure is:
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.xx; // match existing tests
 
 // NO imports. Not even forge-std/Test.sol. NOTHING.
 
 contract SymbolicPropertyTests {
     // NO constructor. NO setUp(). NO state variables (or only uint constants).
 
-    function check_P15_fee_conservation(uint256 a, uint256 b) external pure {
+    function check_P1_conservation(uint256 a, uint256 b) external pure {
         require(a > 0);   // <-- use require() to constrain inputs, NOT vm.assume()
-        // ... inline math ...
+        // ... inline math from source ...
         assert(result == expected);  // <-- use assert() for the property
     }
 }
@@ -58,7 +58,7 @@ contract SymbolicPropertyTests {
 8. **Functions must be `external pure`** — symbolic inputs come from function parameters
 9. Every test MUST compile with `forge build` — no imports means no import errors
 
-## Canonical Example
+## Canonical Example (generic arithmetic conservation)
 
 ```solidity
 // SPDX-License-Identifier: MIT
@@ -66,140 +66,89 @@ pragma solidity ^0.8.27;
 
 // NO imports. This is intentional. Halmos crashes on forge-std/Test.sol.
 
-contract SymbolicFeeConservation {
-    uint256 constant PPM_MAX = 1_000_000;
+contract SymbolicConservation {
+    uint256 constant FIXED_POINT_SCALAR = 1e18;
 
-    /// @notice P-15: fee distribution conserves total value (within integer rounding)
-    function check_P15_fee_conservation(
-        uint256 totalAmount,
-        uint256 protocolTaxPPM,
-        uint256 dataServiceCutPPM,
-        uint256 delegationCutPPM
+    /// @notice Check that a proportional deduction never exceeds the input
+    function check_P1_proportional_deduction(
+        uint256 amount,
+        uint256 ratio  // ratio in FIXED_POINT_SCALAR units (0 to 1e18)
     ) external pure {
-        // Constrain inputs to realistic ranges
-        require(totalAmount > 0);
-        require(totalAmount < type(uint128).max);
-        require(protocolTaxPPM <= PPM_MAX);
-        require(dataServiceCutPPM <= PPM_MAX);
-        require(delegationCutPPM <= PPM_MAX);
-        require(protocolTaxPPM + dataServiceCutPPM + delegationCutPPM <= PPM_MAX);
+        require(amount > 0);
+        require(amount < type(uint128).max);
+        require(ratio <= FIXED_POINT_SCALAR);
 
-        // Inline the fee math (copied from GraphPayments.sol — do NOT call the contract)
-        uint256 tax = (totalAmount * protocolTaxPPM) / PPM_MAX;
-        uint256 remaining = totalAmount - tax;
-        uint256 dsCut = (remaining * dataServiceCutPPM) / PPM_MAX;
-        uint256 delCut = (remaining * delegationCutPPM) / PPM_MAX;
-        uint256 receiverAmount = remaining - dsCut - delCut;
+        // Inline the math from source (do NOT call the contract)
+        uint256 deducted = amount * ratio / FIXED_POINT_SCALAR;
 
-        uint256 distributed = tax + dsCut + delCut + receiverAmount;
-
-        // Allow up to 3 wei rounding loss (1 per integer division) — this is expected
-        assert(distributed >= totalAmount - 3);
-        assert(distributed <= totalAmount);
+        // Property: deduction must not exceed input
+        assert(deducted <= amount);
     }
 
-    /// @notice P-10: provider stake is absorbed before delegation pool tokens
-    function check_P10_provider_absorbs_first(
-        uint256 providerStake,
-        uint256 delegatorTokens,
-        uint256 slashAmount
+    /// @notice Check rounding direction in share conversion
+    function check_P2_share_conversion_rounding(
+        uint256 assets,
+        uint256 totalAssets,
+        uint256 totalShares
     ) external pure {
-        require(providerStake < type(uint128).max);
-        require(delegatorTokens < type(uint128).max);
-        require(slashAmount > 0);
-        require(slashAmount <= providerStake + delegatorTokens);
+        require(assets > 0);
+        require(totalAssets > 0);
+        require(totalShares > 0);
+        require(assets < type(uint128).max);
+        require(totalAssets < type(uint128).max);
+        require(totalShares < type(uint128).max);
 
-        // Inline slashing logic (mirrored from HorizonStaking._slash — do NOT call the contract)
-        uint256 providerAfter;
-        uint256 delegatorAfter;
-        if (slashAmount <= providerStake) {
-            providerAfter = providerStake - slashAmount;
-            delegatorAfter = delegatorTokens;
-        } else {
-            providerAfter = 0;
-            uint256 remainder = slashAmount - providerStake;
-            delegatorAfter = delegatorTokens > remainder ? delegatorTokens - remainder : 0;
-        }
+        // ERC4626-style shares = assets * totalShares / totalAssets (rounds down)
+        uint256 shares = assets * totalShares / totalAssets;
 
-        // P-10: when slash fits in provider stake, delegators must be untouched
-        if (slashAmount <= providerStake) {
-            assert(delegatorAfter == delegatorTokens);
-        } else {
-            // Provider must be fully drained before delegators are touched
-            assert(providerAfter == 0);
-        }
+        // Converting back: assets_back = shares * totalAssets / totalShares (rounds down)
+        uint256 assetsBack = shares * totalAssets / totalShares;
 
-        // Total removed must not exceed slash amount
-        uint256 totalBefore = providerStake + delegatorTokens;
-        uint256 totalAfter = providerAfter + delegatorAfter;
-        assert(totalBefore - totalAfter <= slashAmount);
+        // Round-trip must not inflate: user gets back <= what they put in
+        assert(assetsBack <= assets);
     }
 }
 ```
 
-## Properties to Verify — INLINE MATH ONLY
+## How to Select Properties
 
-> For every property: read the relevant source, extract the arithmetic, inline it. Do NOT call the contract.
+Read `PROPERTIES.md` — each P-XX entry defines an invariant. Choose properties that:
+1. **Can be expressed as inline pure arithmetic** — ideal for Halmos
+2. Involve rounding, overflow, division, or numerical bounds — these are highest value
+3. Are conservation laws (input == output within rounding tolerance)
 
-### 1. P-15: Fee Distribution Conservation (BEST FIT — PURE MATH)
-- Read `GraphPayments.collect()` source, extract the fee calculation arithmetic, inline it
-- Verify: `distributed >= totalCollected - 3 && distributed <= totalCollected`
-- Use tolerance of 3 wei (1 per integer division), NOT exact `==`
-- Function must be `external pure` with NO imports
+Properties that require contract state or multiple transactions belong in the fuzzing pass instead.
 
-### 2. P-10: Provider-First Slashing (GOOD FIT — MODEL THE LOGIC)
-- Read `HorizonStaking._slash()` (or equivalent) source, extract the if/else logic, inline it
-- Verify: when `slashAmount <= providerStake`, delegators are untouched; provider always drained first
-- Function must be `external pure` with NO imports
+## Process
 
-### 3. P-16: RAV Monotonicity (GOOD FIT — PURE COMPARISON)
-- Read `PaymentsEscrow` source for the RAV update/comparison logic
-- Verify: `newValueAggregate >= oldValueAggregate`
-- Model as pure arithmetic — function must be `external pure` with NO imports
-
-### 4. P-19: Operator Value Extraction (MEDIUM — MODEL TOKEN FLOW)
-- Inline a simplified model of the operator action's token accounting
-- Verify: operator's net token delta is <= 0 after a single modelled action
-- Function must be `external pure` with NO imports
-
-### 5. P-1: Stake Conservation (SIMPLIFY OR SKIP)
-- Only attempt if it can be expressed as pure arithmetic (delta in == delta out)
-- If it requires contract state, skip it and note it in the assessment
-- Do NOT deploy a contract to verify this — that will crash Halmos
-
-## Halmos Limitations (be honest in output)
-
-- Verification is BOUNDED — valid only up to the configured loop/input bounds
-- ANY contract deployment or base class inheritance will crash Halmos
-- If a property cannot be expressed as inline pure arithmetic, it belongs in the fuzzing pass instead
-
-## Before You Start
-
-1. Read `PROPERTIES.md` — the properties you're verifying
-2. Read the source code of the relevant contracts to extract the arithmetic you need to inline
-3. Read `audit-workspace/recon/entry-points.json` for function signatures
-
-**CRITICAL**: Write ALL test files first, then run `forge build` ONCE to verify.
-- No imports means almost nothing can go wrong with compilation
-- If it fails, the pragma version is probably wrong — check existing test files
+1. Read `PROPERTIES.md` — identify all P-XX properties
+2. Read `AUDIT_CONTEXT.md` — understand the protocol's arithmetic operations
+3. For each selected property:
+   - Read the relevant source contract to extract the arithmetic
+   - Inline the math (copy the formula, do NOT call the contract)
+   - Write a `check_P{N}_{description}` function
+4. Group related checks into logical files
 
 ## Output
 
 Write symbolic test files to `audit-workspace/formal/`:
-- `SymbolicFeeConservation.t.sol` — P-15
-- `SymbolicSlashing.t.sol` — P-10
-- `SymbolicRAV.t.sol` — P-16
-- `SymbolicOperator.t.sol` — P-19
-- `SymbolicStakeConservation.t.sol` — P-1 (or skip with note)
+- Use file names like `SymbolicAccounting.t.sol`, `SymbolicLiquidation.t.sol`, etc.
+- Name them after the protocol's own concepts (read AUDIT_CONTEXT.md)
 
 For each property, also write a brief assessment to `audit-workspace/formal/halmos-assessment.json`:
 
 ```json
 {
-  "property": "P-15",
+  "property": "P-1",
   "halmos_feasible": true,
   "estimated_complexity": "low | medium | high",
   "recommended_bounds": "--loop 3 --solver-timeout-assertion 300",
   "notes": "Pure arithmetic, ideal for Halmos"
 }
 ```
+
+## Halmos Limitations (be honest in output)
+
+- Verification is BOUNDED — valid only up to the configured loop/input bounds
+- ANY contract deployment or base class inheritance will crash Halmos
+- If a property cannot be expressed as inline pure arithmetic, note it in the assessment and skip it

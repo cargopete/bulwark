@@ -6,7 +6,7 @@ set -euo pipefail
 
 # ── Paths ──────────────────────────────────────────────────────────────
 BULWARK_ROOT="${BULWARK_ROOT:-/home/auditor}"
-AUDIT_DIR="${AUDIT_DIR:-$BULWARK_ROOT/audits/graph-contracts}"
+AUDIT_DIR="${AUDIT_DIR:-$BULWARK_ROOT/audits/target}"
 WORKSPACE="${WORKSPACE:-$AUDIT_DIR/audit-workspace}"
 CONTEXT_DIR="${CONTEXT_DIR:-$BULWARK_ROOT/context}"
 
@@ -149,31 +149,14 @@ record_pass_status() {
 }
 
 # ── Scope helpers ─────────────────────────────────────────────────────
-# Graph-specific: known package paths
-GRAPH_PACKAGES=(
-    "packages/horizon"
-    "packages/subgraph-service"
-)
-
-# Key contracts for focused analysis
-GRAPH_CORE_CONTRACTS=(
-    "HorizonStaking"
-    "HorizonStakingExtension"
-    "GraphPayments"
-    "PaymentsEscrow"
-    "GraphTallyCollector"
-    "SubgraphService"
-    "DisputeManager"
-)
-
-# Iterate over in-scope packages
+# Iterate over in-scope packages (scope list passed as arguments)
 for_each_package() {
     local callback="$1"
     shift
-    for pkg in "${GRAPH_PACKAGES[@]}"; do
+    for pkg in "$@"; do
         local pkg_path="$AUDIT_DIR/$pkg"
         if [ -d "$pkg_path" ]; then
-            "$callback" "$pkg_path" "$@"
+            "$callback" "$pkg_path"
         else
             log_warn "Package not found: $pkg"
         fi

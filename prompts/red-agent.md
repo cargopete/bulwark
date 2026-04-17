@@ -102,7 +102,7 @@ Read these files in order:
 
 Before starting your manual analysis, run these installed skills:
 
-1. **Run `/tob-scv-scan`** on all contracts in `packages/horizon/contracts/` and `packages/subgraph-service/contracts/`
+1. **Run `/tob-scv-scan`** on all in-scope contract directories (check AUDIT_CONTEXT.md for scope)
    - This scans for 36 vulnerability classes automatically
    - Use its output to prioritise your manual analysis
    - If the skill is not available, proceed without it

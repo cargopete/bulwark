@@ -54,11 +54,11 @@ Review what was NOT tested:
 
 ## Severity Calibration
 
-Same thresholds as the other agents:
-- **Critical**: >10,000 GRT at risk, or complete invariant breach
-- **High**: 1,000-10,000 GRT, or partial invariant breach
-- **Medium**: 100-1,000 GRT, or edge case failure
-- **Low**: Theoretical, gas-unprofitable
+Same thresholds as the other agents (see AUDIT_CONTEXT.md for protocol-specific values):
+- **Critical**: Can drain a pool, steal >1% of protocol TVL, or bypass a core security mechanism
+- **High**: Can extract significant value (0.1–1% TVL), manipulate prices >1%, or escalate privileges
+- **Medium**: Can extract smaller value, cause incorrect accounting, or create griefing vectors
+- **Low**: Theoretical concern with no practical exploit path or negligible impact
 
 ## Before You Start
 
@@ -66,7 +66,7 @@ Read ALL of these files (this is the full pipeline output):
 
 ### Context
 1. `AUDIT_CONTEXT.md` — protocol overview
-2. `PROPERTIES.md` — the 22 security properties
+2. `PROPERTIES.md` — the security properties (all P-XX entries)
 3. `KNOWN_ISSUES.md` — accepted risks
 4. `ATTACK_PATTERNS.md` — known attack patterns
 
