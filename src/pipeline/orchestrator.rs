@@ -140,12 +140,15 @@ impl Orchestrator {
 
             let pass_start = Instant::now();
             info!(pass = num, name = pass_num.name(), "starting");
+            // Structured progress line read by the bulwark-cloud Python orchestrator.
+            println!("[pass:{num}] [status:running]");
             let result = self.execute_pass(*pass_num).await;
             let duration = pass_start.elapsed().as_secs();
 
             let pass_result = match result {
                 Ok(summary) => {
                     info!(pass = num, duration, "completed");
+                    println!("[pass:{num}] [status:done] [duration_s:{duration}]");
                     eprintln!(
                         "  {} Pass {} completed in {}s",
                         style("✓").green(),
@@ -161,6 +164,7 @@ impl Orchestrator {
                 }
                 Err(e) => {
                     error!(pass = num, duration, err = %e, "FAILED");
+                    println!("[pass:{num}] [status:failed] [duration_s:{duration}]");
                     eprintln!(
                         "  {} Pass {} FAILED after {}s: {}",
                         style("✗").red(),
