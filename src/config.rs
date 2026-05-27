@@ -40,6 +40,12 @@ pub struct TargetConfig {
 
     #[serde(default)]
     pub math_sensitive: Vec<String>,
+
+    /// Optional shell command to run inside each scope directory before `forge build`.
+    /// Useful for Hardhat/npm projects that need `pnpm install` or `npm install` first.
+    /// Example: `pre_build_cmd = "pnpm install --frozen-lockfile"`
+    #[serde(default)]
+    pub pre_build_cmd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

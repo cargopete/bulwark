@@ -4,6 +4,11 @@ reports/*.md
 reports/*.json
 *.tmp
 
+# Local dev / personal config
+.claude/
+scripts/run-remote.sh
+examples/
+poc/
 
 # Added by cargo
 

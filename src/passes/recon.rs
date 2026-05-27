@@ -29,6 +29,14 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let pkg_name = pkg_path.file_name().unwrap_or_default().to_string_lossy();
         eprintln!("    Building {pkg_name}...");
 
+        if let Some(cmd) = &ctx.config.target.pre_build_cmd {
+            eprintln!("    Running pre-build: {cmd}");
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            if let Some((prog, args)) = parts.split_first() {
+                let _ = crate::tools::run_command(prog, args, &pkg_path).await;
+            }
+        }
+
         let result = forge::build(&forge_bin, &pkg_path).await?;
         let result = if !result.success {
             let patched = crate::passes::fuzzing::patch_missing_remappings(&pkg_path, &result.stderr);
