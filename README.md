@@ -297,6 +297,23 @@ cargo clippy          # Lint
 cargo build --release # Build release binary
 ```
 
+## Running as a service
+
+[bulwark-cloud](https://github.com/cargopete/bulwark-cloud) wraps this CLI in an AWS-native
+service — submit audits via HTTPS, results stored in S3 and DynamoDB, pipeline runs on
+ECS Fargate. No local Docker required.
+
+```
+POST /v1/audits { repo, branch, scope, model }
+→ { job_id, status: PENDING }
+
+GET /v1/audits/{job_id}
+→ { status: COMPLETED, findings_count: {CRITICAL: 1, HIGH: 3} }
+
+GET /v1/audits/{job_id}/report?format=md
+→ { url: "https://s3.../signed-url" }
+```
+
 ## License
 
 [MIT](LICENSE)
