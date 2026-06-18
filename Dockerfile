@@ -40,11 +40,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Symlink fd (Ubuntu packages it as fdfind)
 RUN ln -sf /usr/bin/fdfind /usr/bin/fd
 
-# ── Node.js 22 ───────────────────────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+# ── Node.js 24 + Corepack ────────────────────────────────────────────
+# Node 24 satisfies modern monorepos (e.g. The Graph requires node ^24).
+# Corepack auto-provisions the exact pnpm version each project pins via its
+# package.json "packageManager" field, while pnpm@9 stays the default fallback
+# for projects without one.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g pnpm@9 \
+    && corepack enable \
+    && corepack prepare pnpm@9.15.0 --activate \
     && rm -rf /var/lib/apt/lists/*
+
+# Let corepack auto-download a project's pinned pnpm without an interactive prompt
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 # ── Python tools (Slither + optionally Mythril) ─────────────────────
 RUN python3 -m venv /opt/solidity-tools \
