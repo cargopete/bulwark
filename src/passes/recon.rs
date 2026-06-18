@@ -31,9 +31,25 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
         if let Some(cmd) = &ctx.config.target.pre_build_cmd {
             eprintln!("    Running pre-build: {cmd}");
-            let parts: Vec<&str> = cmd.split_whitespace().collect();
-            if let Some((prog, args)) = parts.split_first() {
-                let _ = crate::tools::run_command(prog, args, &pkg_path).await;
+            // Run through a shell so compound commands (`&&`, pipes, env vars)
+            // and quoting work — pre_build_cmd is documented as a shell command.
+            match crate::tools::run_command("sh", &["-c", cmd], &pkg_path).await {
+                Ok(out) if out.status.success() => {
+                    eprintln!("    {} pre-build ok", style("✓").green());
+                }
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let tail = stderr.lines().rev().take(8).collect::<Vec<_>>();
+                    eprintln!(
+                        "    {} pre-build failed (exit {}):",
+                        style("⚠").yellow(),
+                        out.status.code().unwrap_or(-1)
+                    );
+                    for line in tail.into_iter().rev() {
+                        eprintln!("      {line}");
+                    }
+                }
+                Err(e) => eprintln!("    {} pre-build could not run: {e}", style("⚠").yellow()),
             }
         }
 
