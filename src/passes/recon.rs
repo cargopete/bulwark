@@ -38,8 +38,16 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                     eprintln!("    {} pre-build ok", style("✓").green());
                 }
                 Ok(out) => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    let tail = stderr.lines().rev().take(8).collect::<Vec<_>>();
+                    // Node tools (pnpm/npm) write errors to stdout, not stderr —
+                    // surface both so failures are diagnosable.
+                    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+                    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                    let tail: Vec<&str> = combined
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .rev()
+                        .take(12)
+                        .collect();
                     eprintln!(
                         "    {} pre-build failed (exit {}):",
                         style("⚠").yellow(),
