@@ -15,11 +15,7 @@ pub async fn analyze(
 
     let output = super::run_command(
         slither_bin.to_str().unwrap_or("slither"),
-        &[
-            contracts_dir.to_str().unwrap_or("."),
-            "--json",
-            output_str,
-        ],
+        &[contracts_dir.to_str().unwrap_or("."), "--json", output_str],
         contracts_dir.parent().unwrap_or(contracts_dir),
     )
     .await?;
@@ -91,10 +87,6 @@ pub struct SlitherSummary {
 
 impl std::fmt::Display for SlitherSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "H:{} M:{} L:{}",
-            self.high, self.medium, self.low
-        )
+        write!(f, "H:{} M:{} L:{}", self.high, self.medium, self.low)
     }
 }

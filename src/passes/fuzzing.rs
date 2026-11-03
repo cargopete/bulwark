@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 /// Pass 4: Fuzzing Campaign.
@@ -28,7 +28,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     // Clear stale files from previous runs before generating fresh ones.
     // This prevents partial/timed-out files from a previous run from contaminating the build.
     if invariant_dir.exists() {
-        for entry in std::fs::read_dir(&invariant_dir).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(&invariant_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let p = entry.path();
             if p.extension().is_some_and(|e| e == "sol") {
                 let _ = std::fs::remove_file(&p);
@@ -61,10 +65,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         copy_sol_files(&invariant_dir, &forge_test_dir)?;
         sanitize_sol_unicode(&forge_test_dir);
 
-        let invariant_count = count_invariant_functions(&forge_test_dir) + count_invariant_functions(&build_dir.join("test"));
-        eprintln!(
-            "  Found {invariant_count} invariant_ function(s) in test/invariant/"
-        );
+        let invariant_count = count_invariant_functions(&forge_test_dir)
+            + count_invariant_functions(&build_dir.join("test"));
+        eprintln!("  Found {invariant_count} invariant_ function(s) in test/invariant/");
 
         // Remove stub/disabled PoC files before compiling — failed PoC generation sometimes
         // leaves behind comment-only stubs (or files the AI "disabled") that still get compiled
@@ -100,9 +103,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let mut foundry_failed = 0u32;
 
     if tests_exist {
-        eprintln!(
-            "  Running Foundry invariant tests (fuzz-runs={fuzz_runs})..."
-        );
+        eprintln!("  Running Foundry invariant tests (fuzz-runs={fuzz_runs})...");
 
         let fuzz_runs_str = fuzz_runs.to_string();
         let output = crate::tools::run_command(
@@ -133,10 +134,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
         // Extract broken invariants as findings
         if foundry_failed > 0 {
-            eprintln!(
-                "  {} Broken invariants detected!",
-                style("⚠").yellow()
-            );
+            eprintln!("  {} Broken invariants detected!", style("⚠").yellow());
             let mut idx = 1;
             for line in combined.lines() {
                 if line.contains("[FAIL]") {
@@ -155,13 +153,17 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     if tests_exist && ctx.config.has_tool("medusa") {
         let medusa_bin = ctx.config.resolve_tool("medusa")?;
         let timeout_str = ctx.config.passes.fuzzing.medusa_timeout.to_string();
-        eprintln!(
-            "  Running Medusa extended fuzzing (timeout={timeout_str}s)..."
-        );
+        eprintln!("  Running Medusa extended fuzzing (timeout={timeout_str}s)...");
 
         let output = crate::tools::run_command(
             medusa_bin.to_str().unwrap_or("medusa"),
-            &["fuzz", "--target-contracts", "Invariant", "--timeout", &timeout_str],
+            &[
+                "fuzz",
+                "--target-contracts",
+                "Invariant",
+                "--timeout",
+                &timeout_str,
+            ],
             &build_dir,
         )
         .await?;
@@ -197,7 +199,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
         let output = crate::tools::run_command(
             echidna_bin.to_str().unwrap_or("echidna"),
-            &[".", "--contract", "CryticTester", "--test-limit", &limit_str],
+            &[
+                ".",
+                "--contract",
+                "CryticTester",
+                "--test-limit",
+                &limit_str,
+            ],
             &build_dir,
         )
         .await?;
@@ -286,8 +294,11 @@ async fn generate_invariant_tests(
         // No Bash — prevents Claude from running forge build in a compile-fix loop.
         // The pipeline compiles the generated files itself after this session ends.
         allowed_tools: vec![
-            "Read".into(), "Write".into(), "Edit".into(),
-            "Glob".into(), "Grep".into(),
+            "Read".into(),
+            "Write".into(),
+            "Edit".into(),
+            "Glob".into(),
+            "Grep".into(),
         ],
         timeout_minutes: Some(30),
         label: "fuzzing".into(),
@@ -295,7 +306,9 @@ async fn generate_invariant_tests(
         ledger: Some(ctx.ledger.clone()),
     };
 
-    let _ = session.run_with_spinner("Generating invariant tests...").await;
+    let _ = session
+        .run_with_spinner("Generating invariant tests...")
+        .await;
     count_sol_files(invariant_dir)
 }
 
@@ -335,7 +348,10 @@ fn count_invariant_functions(dir: &Path) -> usize {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "sol") {
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    count += content.lines().filter(|l| l.contains("function invariant_")).count();
+                    count += content
+                        .lines()
+                        .filter(|l| l.contains("function invariant_"))
+                        .count();
                 }
             } else if path.is_dir() {
                 count += count_invariant_functions(&path);
@@ -366,7 +382,10 @@ pub fn patch_missing_remappings(build_dir: &Path, stderr: &str) -> usize {
                     let suffix = &path_str[slash + 1..]; // e.g. "unit/staking/HorizonStaking.t.sol"
 
                     // Skip if already remapped
-                    if existing.lines().any(|l| l.starts_with(&format!("{prefix}/"))) {
+                    if existing
+                        .lines()
+                        .any(|l| l.starts_with(&format!("{prefix}/")))
+                    {
                         continue;
                     }
 
@@ -450,18 +469,20 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
 /// Replace curly/smart quotes and typographic dashes in AI-generated .sol files.
 /// Solidity only accepts ASCII string literals; curly quotes cause parse errors.
 fn sanitize_sol_unicode(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "sol") {
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             let sanitized = content
-                .replace('\u{201C}', "\"") // left double quotation mark "
-                .replace('\u{201D}', "\"") // right double quotation mark "
-                .replace('\u{2018}', "'")  // left single quotation mark '
-                .replace('\u{2019}', "'")  // right single quotation mark '
+                .replace(['\u{201C}', '\u{201D}'], "\"") // curly double quotes
+                .replace(['\u{2018}', '\u{2019}'], "'") // curly single quotes
                 .replace('\u{2014}', "--") // em dash —
-                .replace('\u{2013}', "-")  // en dash –
+                .replace('\u{2013}', "-") // en dash –
                 .replace('\u{2026}', "..."); // horizontal ellipsis …
             if sanitized != content {
                 let _ = std::fs::write(&path, sanitized);
@@ -474,11 +495,15 @@ fn sanitize_sol_unicode(dir: &std::path::Path) {
 /// Failed PoC generation can leave stubs like "// File disabled ..." that still get compiled
 /// and can contain stale imports that break the entire forge build in subsequent passes.
 fn clean_stub_poc_files(pocs_dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(pocs_dir) else { return };
+    let Ok(entries) = std::fs::read_dir(pocs_dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "sol") {
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             // A stub file has no lines with actual Solidity content (no `contract`, `pragma`, `import`, etc.)
             let has_real_content = content.lines().any(|l| {
                 let t = l.trim();

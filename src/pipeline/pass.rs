@@ -45,7 +45,9 @@ impl PipelineContext {
         if project_path.exists() {
             return project_path;
         }
-        self.bulwark_install.join(&self.config.prompts.dir).join(filename)
+        self.bulwark_install
+            .join(&self.config.prompts.dir)
+            .join(filename)
     }
 
     /// Resolve the primary Foundry build directory.

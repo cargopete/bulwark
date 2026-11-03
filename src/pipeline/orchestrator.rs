@@ -119,7 +119,11 @@ impl Orchestrator {
 
             // Skip AI passes if not authenticated
             if pass_num.requires_claude() && !claude_auth.is_authenticated() {
-                warn!(pass = num, name = pass_num.name(), "skipping — Claude not authenticated");
+                warn!(
+                    pass = num,
+                    name = pass_num.name(),
+                    "skipping — Claude not authenticated"
+                );
                 eprintln!(
                     "  {} Skipping Pass {} ({}) — Claude not authenticated",
                     style("⚠").yellow(),
@@ -139,13 +143,9 @@ impl Orchestrator {
 
             eprintln!(
                 "\n{}\n",
-                style(format!(
-                    "━━━ Pass {}: {} ━━━",
-                    num,
-                    pass_num.description()
-                ))
-                .blue()
-                .bold()
+                style(format!("━━━ Pass {}: {} ━━━", num, pass_num.description()))
+                    .blue()
+                    .bold()
             );
 
             let pass_start = Instant::now();
@@ -342,10 +342,7 @@ impl Orchestrator {
     }
 
     fn print_summary(&self, results: &[PassResult], total_secs: u64) {
-        eprintln!(
-            "\n{}\n",
-            style("━━━ Pipeline Complete ━━━").blue().bold()
-        );
+        eprintln!("\n{}\n", style("━━━ Pipeline Complete ━━━").blue().bold());
 
         for r in results {
             let status_str = r.status.to_string();
@@ -363,15 +360,8 @@ impl Orchestrator {
             );
         }
 
-        eprintln!(
-            "\n  Total: {}m {}s",
-            total_secs / 60,
-            total_secs % 60
-        );
-        eprintln!(
-            "  Workspace: {}",
-            self.ctx.workspace.root().display()
-        );
+        eprintln!("\n  Total: {}m {}s", total_secs / 60, total_secs % 60);
+        eprintln!("  Workspace: {}", self.ctx.workspace.root().display());
         let spent = self.ctx.ledger.spent();
         match self.ctx.ledger.remaining() {
             Some(left) => eprintln!(

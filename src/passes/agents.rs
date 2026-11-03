@@ -1,6 +1,6 @@
 use crate::error::{BulwarkError, Result};
-use crate::findings::merge;
 use crate::findings::Finding;
+use crate::findings::merge;
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::{self, ClaudeSession};
 use console::style;
@@ -64,9 +64,10 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
 
     // Set up progress bars
     let multi = MultiProgress::new();
-    let spinner_style = ProgressStyle::with_template("  {spinner:.cyan} {prefix}: {msg} ({elapsed})")
-        .unwrap()
-        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+    let spinner_style =
+        ProgressStyle::with_template("  {spinner:.cyan} {prefix}: {msg} ({elapsed})")
+            .unwrap()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
 
     // Launch agents in parallel
     let mut set = JoinSet::new();
@@ -364,10 +365,7 @@ async fn run_variant_analysis(
     Ok(all_variants.len())
 }
 
-fn merge_agent_outputs(
-    ctx: &PipelineContext,
-    agents: &[String],
-) -> Result<merge::MergeResult> {
+fn merge_agent_outputs(ctx: &PipelineContext, agents: &[String]) -> Result<merge::MergeResult> {
     let mut sources = Vec::new();
 
     for agent_name in agents {
@@ -380,7 +378,8 @@ fn merge_agent_outputs(
             Ok(f) => f,
             Err(_) => {
                 // Try to parse as generic JSON array and filter to items with severity
-                let arr: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap_or_default();
+                let arr: Vec<serde_json::Value> =
+                    serde_json::from_str(&content).unwrap_or_default();
                 arr.into_iter()
                     .filter(|v| v.get("severity").is_some())
                     .filter_map(|v| serde_json::from_value(v).ok())

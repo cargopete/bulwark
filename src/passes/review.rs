@@ -4,7 +4,7 @@ use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
 use chrono::Utc;
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
 
@@ -26,8 +26,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let validated = read_json_array(&ctx.workspace.validated_findings());
     let unverifiable = read_json_array(&ctx.workspace.unverifiable_findings());
     let fuzz_findings = read_json_array(&ctx.workspace.fuzzing_dir().join("fuzzing-findings.json"));
-    let formal_findings =
-        read_json_array(&ctx.workspace.formal_dir().join("formal-findings.json"));
+    let formal_findings = read_json_array(&ctx.workspace.formal_dir().join("formal-findings.json"));
 
     if !unverifiable.is_empty() {
         eprintln!(
@@ -123,8 +122,7 @@ pub fn generate_report(ctx: &PipelineContext) -> Result<String> {
     // Assemble all findings
     let validated = read_json_array(&ctx.workspace.validated_findings());
     let fuzz_findings = read_json_array(&ctx.workspace.fuzzing_dir().join("fuzzing-findings.json"));
-    let formal_findings =
-        read_json_array(&ctx.workspace.formal_dir().join("formal-findings.json"));
+    let formal_findings = read_json_array(&ctx.workspace.formal_dir().join("formal-findings.json"));
 
     let mut all_findings: Vec<Value> = Vec::new();
     all_findings.extend(validated);
@@ -249,7 +247,14 @@ async fn run_adversarial_review(
                 let challenges = data
                     .pointer("/property_challenges")
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter(|v| v.get("reviewer_verdict").and_then(|s| s.as_str()) == Some("CHALLENGE")).count())
+                    .map(|a| {
+                        a.iter()
+                            .filter(|v| {
+                                v.get("reviewer_verdict").and_then(|s| s.as_str())
+                                    == Some("CHALLENGE")
+                            })
+                            .count()
+                    })
                     .unwrap_or(0);
                 let upgrades = data
                     .pointer("/severity_challenges")
@@ -259,7 +264,13 @@ async fn run_adversarial_review(
                 let reinstated = data
                     .pointer("/reinstatements")
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter(|v| v.get("verdict").and_then(|s| s.as_str()) == Some("REINSTATE")).count())
+                    .map(|a| {
+                        a.iter()
+                            .filter(|v| {
+                                v.get("verdict").and_then(|s| s.as_str()) == Some("REINSTATE")
+                            })
+                            .count()
+                    })
                     .unwrap_or(0);
                 let compounds = data
                     .pointer("/compound_attacks")
@@ -295,11 +306,7 @@ async fn run_adversarial_review(
     None
 }
 
-fn apply_review_adjustments(
-    findings: &mut Vec<Value>,
-    review: &Value,
-    ctx: &PipelineContext,
-) {
+fn apply_review_adjustments(findings: &mut Vec<Value>, review: &Value, ctx: &PipelineContext) {
     // Apply severity upgrades
     if let Some(upgrades) = review.get("severity_challenges").and_then(|v| v.as_array()) {
         for upgrade in upgrades {
@@ -338,7 +345,9 @@ fn apply_review_adjustments(
                         reinstated["poc_status"] = json!("reinstated_by_review");
                         let justification = reinstatements
                             .iter()
-                            .find(|r| r.get("finding_id").and_then(|v| v.as_str()) == Some(id.as_str()))
+                            .find(|r| {
+                                r.get("finding_id").and_then(|v| v.as_str()) == Some(id.as_str())
+                            })
                             .and_then(|r| r.get("justification").and_then(|v| v.as_str()))
                             .unwrap_or("");
                         reinstated["reinstated_reason"] = json!(justification);
@@ -367,14 +376,20 @@ fn write_markdown_report(
 
     writeln!(f, "# Bulwark Audit Report")?;
     writeln!(f)?;
-    let target_name = ctx.config.target.repo
+    let target_name = ctx
+        .config
+        .target
+        .repo
         .trim_end_matches(".git")
         .rsplit('/')
         .next()
         .unwrap_or("unknown");
     writeln!(f, "**Target**: {target_name}")?;
     writeln!(f, "**Date**: {date}")?;
-    writeln!(f, "**Pipeline**: 6-pass (Recon -> Multi-Agent -> PoC Gate -> Fuzzing -> Formal Verification -> Adversarial Review)")?;
+    writeln!(
+        f,
+        "**Pipeline**: 6-pass (Recon -> Multi-Agent -> PoC Gate -> Fuzzing -> Formal Verification -> Adversarial Review)"
+    )?;
     writeln!(f)?;
     writeln!(f, "---")?;
     writeln!(f)?;
@@ -394,7 +409,10 @@ fn write_markdown_report(
     if !failed_pkgs.is_empty() || !missing_contracts.is_empty() {
         writeln!(f, "## ⚠ Scope Coverage Warning")?;
         writeln!(f)?;
-        writeln!(f, "**This report does not cover the full configured scope.**")?;
+        writeln!(
+            f,
+            "**This report does not cover the full configured scope.**"
+        )?;
         writeln!(f)?;
         if !failed_pkgs.is_empty() {
             writeln!(
@@ -403,7 +421,10 @@ fn write_markdown_report(
             )?;
             writeln!(f)?;
             for pkg in &failed_pkgs {
-                writeln!(f, "- `{pkg}` — build failed (see `recon/build-{pkg}-stderr.txt`)")?;
+                writeln!(
+                    f,
+                    "- `{pkg}` — build failed (see `recon/build-{pkg}-stderr.txt`)"
+                )?;
             }
             writeln!(f)?;
         }
@@ -433,9 +454,7 @@ fn write_markdown_report(
     let unverifiable_findings: Vec<&Value> = findings
         .iter()
         .filter(|f| {
-            f.get("poc_status")
-                .and_then(|v| v.as_str())
-                == Some("unverifiable_build_failure")
+            f.get("poc_status").and_then(|v| v.as_str()) == Some("unverifiable_build_failure")
         })
         .collect();
 
@@ -511,10 +530,7 @@ fn write_markdown_report(
                 .get("severity")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            let title = finding
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let title = finding.get("title").and_then(|v| v.as_str()).unwrap_or("-");
             let contract = finding
                 .get("contract")
                 .and_then(|v| v.as_str())
@@ -533,10 +549,7 @@ fn write_markdown_report(
 
         for finding in findings {
             let id = finding.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-            let title = finding
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let title = finding.get("title").and_then(|v| v.as_str()).unwrap_or("-");
             let sev = finding
                 .get("severity")
                 .and_then(|v| v.as_str())
@@ -576,10 +589,7 @@ fn write_markdown_report(
                 f,
                 "**Severity**: {sev} | **Confidence**: {confidence} | **Source**: {source}"
             )?;
-            writeln!(
-                f,
-                "**Contract**: {contract} | **Function**: {function}"
-            )?;
+            writeln!(f, "**Contract**: {contract} | **Function**: {function}")?;
             writeln!(f, "**Property violated**: {prop}")?;
             writeln!(f)?;
             writeln!(f, "**Attack scenario**: {scenario}")?;
@@ -610,10 +620,7 @@ fn write_markdown_report(
     }
 
     // Formal verification results
-    let ver_file = ctx
-        .workspace
-        .formal_dir()
-        .join("verification-summary.json");
+    let ver_file = ctx.workspace.formal_dir().join("verification-summary.json");
     if ver_file.exists() {
         if let Some(ver) = read_json_object_opt(&ver_file) {
             if let Some(props) = ver.get("properties").and_then(|v| v.as_object()) {
