@@ -57,6 +57,10 @@ impl Workspace {
         self.root.join("pipeline-status.json")
     }
 
+    pub fn known_duplicates(&self) -> PathBuf {
+        self.findings_dir().join("known-duplicates.json")
+    }
+
     pub fn rejected_findings(&self) -> PathBuf {
         self.findings_dir().join("rejected.json")
     }

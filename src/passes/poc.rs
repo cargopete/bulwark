@@ -57,6 +57,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         return Ok("0 findings in scope".into());
     }
 
+    let findings = crate::known::suppress(ctx, findings, &allowance, &claude_bin).await?;
+    if findings.is_empty() {
+        eprintln!("  All findings match known issues — nothing to validate.");
+        write_json(&ctx.workspace.validated_findings(), &json!([]))?;
+        return Ok("0 findings not already known".into());
+    }
+
     // ── Pre-filter: false positive check ─────────────────────────
     let findings = if ctx.config.passes.poc.fp_check {
         eprintln!(
