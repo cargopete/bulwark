@@ -131,6 +131,15 @@ impl ProgramConfig {
         self.assets.iter().any(|a| a.name == stem)
     }
 
+    /// The impact table alone, for passes that judge severity.
+    pub fn impact_table(&self) -> String {
+        let mut s = String::from("\n\n## Bounty Program Impact Table\n\n");
+        for (i, imp) in self.impacts.iter().enumerate() {
+            s.push_str(&format!("- I-{} [{}] {}\n", i + 1, imp.severity, imp.text));
+        }
+        s
+    }
+
     /// The scope section appended to Pass 2 agent prompts.
     pub fn prompt_section(&self) -> String {
         let mut s = String::from(
