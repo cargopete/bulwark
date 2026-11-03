@@ -162,6 +162,15 @@ pub struct PocPassConfig {
     /// Max turns for each fp-check Claude session.
     #[serde(default = "default_fp_check_turns")]
     pub fp_check_max_turns: u32,
+
+    /// Env var holding the fork RPC URL. Unset means local mode, where no PoC can
+    /// demonstrate. The URL itself never goes in config or logs.
+    #[serde(default)]
+    pub fork_rpc_env: Option<String>,
+
+    /// Block to pin the fork at; required with `fork_rpc_env`.
+    #[serde(default)]
+    pub fork_block: Option<u64>,
 }
 
 impl Default for PocPassConfig {
@@ -172,6 +181,8 @@ impl Default for PocPassConfig {
             max_retries: default_poc_retries(),
             fp_check: true,
             fp_check_max_turns: default_fp_check_turns(),
+            fork_rpc_env: None,
+            fork_block: None,
         }
     }
 }

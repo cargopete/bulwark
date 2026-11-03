@@ -1,9 +1,12 @@
 use crate::error::{BulwarkError, Result};
 use crate::findings::Finding;
+use crate::passes::poc_evidence::{
+    self, GAIN_MARKER, LOSS_MARKER, NOT_REPRODUCIBLE_MARKER, PocMode,
+};
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::{self, ClaudeSession};
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 /// Pass 3: PoC Generation & Validation — "No PoC, no finding" gate.
@@ -37,7 +40,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     // ── Pre-filter: false positive check ─────────────────────────
     let findings = if ctx.config.passes.poc.fp_check {
-        eprintln!("  Running false-positive check on {} findings...", findings.len());
+        eprintln!(
+            "  Running false-positive check on {} findings...",
+            findings.len()
+        );
         run_fp_check_filter(ctx, &findings, &claude_bin).await?
     } else {
         findings
@@ -78,7 +84,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             .ok()
             .and_then(|c| serde_json::from_str::<Value>(&c).ok())
             .and_then(|v| v.get("failed_packages").and_then(|p| p.as_array()).cloned())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default()
     };
 
@@ -90,9 +100,31 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
     }
 
+    let (mode, rpc_url) = poc_mode(&ctx.config.passes.poc)?;
+    match &mode {
+        PocMode::Fork { rpc_env, block } => {
+            eprintln!("  Fork mode: ${rpc_env} pinned at block {block}")
+        }
+        PocMode::Local => eprintln!(
+            "  {} Local mode: no fork configured, so no PoC can count as demonstrated",
+            style("⚠").yellow()
+        ),
+    }
+    let poc_run = PocRun {
+        claude_bin: &claude_bin,
+        forge_bin: &forge_bin,
+        base_prompt: &base_prompt,
+        test_info: &test_info,
+        logs_dir: &logs_dir,
+        max_turns,
+        max_retries,
+        mode: &mode,
+        rpc_url: rpc_url.as_deref(),
+    };
+
     let mut validated: Vec<Value> = Vec::new();
     let mut unverifiable: Vec<Value> = Vec::new();
-    let mut discarded_ids: Vec<String> = Vec::new();
+    let mut discarded: Vec<Value> = Vec::new();
     let mut stats = PocStats::default();
 
     for (idx, finding) in findings.iter().enumerate() {
@@ -108,56 +140,40 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let poc_file = pocs_dir.join(format!("{}.t.sol", finding.id));
         let log_file = logs_dir.join(format!("{}.log", finding.id));
 
-        let poc_status = generate_and_validate_poc(
-            ctx,
-            finding,
-            &base_prompt,
-            &test_info,
-            &claude_bin,
-            &forge_bin,
-            &poc_file,
-            &log_file,
-            &logs_dir,
-            max_turns,
-            max_retries,
-        )
-        .await;
+        let outcome = generate_and_validate_poc(ctx, &poc_run, finding, &poc_file, &log_file).await;
+        let record_file = pocs_dir.join(format!("{}.poc.json", finding.id));
+        if !outcome.record.is_null() {
+            write_json(&record_file, &outcome.record)?;
+        }
 
         apply_validation_gate(
             finding,
-            &poc_status,
+            &outcome,
             &poc_file,
             ctx,
             &failed_packages,
             &mut validated,
             &mut unverifiable,
-            &mut discarded_ids,
+            &mut discarded,
             &mut stats,
         );
     }
 
     // Write validated findings
-    write_json(&ctx.workspace.validated_findings(), &Value::Array(validated.clone()))?;
+    write_json(
+        &ctx.workspace.validated_findings(),
+        &Value::Array(validated.clone()),
+    )?;
 
     // Write unverifiable findings (PoC couldn't compile due to known build failures)
-    write_json(&ctx.workspace.unverifiable_findings(), &Value::Array(unverifiable.clone()))?;
+    write_json(
+        &ctx.workspace.unverifiable_findings(),
+        &Value::Array(unverifiable.clone()),
+    )?;
 
-    // Write discarded findings
-    let discarded: Vec<&Finding> = findings
-        .iter()
-        .filter(|f| discarded_ids.contains(&f.id))
-        .collect();
-    let discarded_json: Vec<Value> = discarded
-        .iter()
-        .map(|f| {
-            let mut v = serde_json::to_value(f).unwrap_or_default();
-            v["poc_status"] = json!("discarded_no_poc");
-            v
-        })
-        .collect();
     write_json(
         &ctx.workspace.discarded_findings(),
-        &Value::Array(discarded_json),
+        &Value::Array(discarded),
     )?;
 
     let survived = stats.validated + stats.inconclusive + stats.unverifiable;
@@ -187,228 +203,283 @@ struct PocStats {
     discarded: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn generate_and_validate_poc(
-    ctx: &PipelineContext,
-    finding: &Finding,
-    base_prompt: &str,
-    test_info: &str,
-    claude_bin: &Path,
-    forge_bin: &Path,
-    poc_file: &Path,
-    log_file: &Path,
-    logs_dir: &Path,
+fn poc_mode(cfg: &crate::config::PocPassConfig) -> Result<(PocMode, Option<String>)> {
+    let Some(env) = &cfg.fork_rpc_env else {
+        return Ok((PocMode::Local, None));
+    };
+    let block = cfg
+        .fork_block
+        .ok_or_else(|| BulwarkError::PrerequisiteNotMet {
+            pass: "poc".into(),
+            reason: "fork_rpc_env is set but fork_block is not; pin the block".into(),
+        })?;
+    let url = std::env::var(env).map_err(|_| BulwarkError::PrerequisiteNotMet {
+        pass: "poc".into(),
+        reason: format!("fork_rpc_env names ${env}, which is not set"),
+    })?;
+    Ok((
+        PocMode::Fork {
+            rpc_env: env.clone(),
+            block,
+        },
+        Some(url),
+    ))
+}
+
+struct PocRun<'a> {
+    claude_bin: &'a Path,
+    forge_bin: &'a Path,
+    base_prompt: &'a str,
+    test_info: &'a str,
+    logs_dir: &'a Path,
     max_turns: u32,
     max_retries: u32,
-) -> String {
+    mode: &'a PocMode,
+    rpc_url: Option<&'a str>,
+}
+
+/// Outcome of one finding's PoC attempts; `record` is written as `<id>.poc.json`.
+struct PocOutcome {
+    status: String,
+    reasons: Vec<String>,
+    record: Value,
+}
+
+async fn generate_and_validate_poc(
+    ctx: &PipelineContext,
+    run: &PocRun<'_>,
+    finding: &Finding,
+    poc_file: &Path,
+    log_file: &Path,
+) -> PocOutcome {
     let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
+    let rel_poc = format!("test/pocs/{}.t.sol", finding.id);
+    let (fork_args, shown_fork_args) = run.mode.forge_args(run.rpc_url);
+    let shown_command = std::iter::once(format!("forge test --match-path {rel_poc} --json -vv"))
+        .chain(shown_fork_args)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mode_text = match run.mode {
+        PocMode::Fork { block, .. } => format!(
+            "Tests run against a fork pinned at block {block}. Attack the DEPLOYED contracts at \
+             their real addresses (see AUDIT_CONTEXT.md); do not deploy fresh copies."
+        ),
+        PocMode::Local => "No fork is configured: tests run on a local deployment.".to_string(),
+    };
 
-    for retry in 0..=max_retries {
+    let mut feedback: Option<String> = None;
+    let mut last = PocOutcome {
+        status: "failed_to_compile".into(),
+        reasons: vec!["no PoC generated".into()],
+        record: Value::Null,
+    };
+
+    // A leftover file from an earlier run would otherwise be graded as this run's work.
+    let _ = std::fs::remove_file(poc_file);
+
+    for retry in 0..=run.max_retries {
         if retry > 0 {
-            eprintln!("    Retry {retry}/{max_retries}...");
+            eprintln!("    Retry {retry}/{}...", run.max_retries);
         }
+        let before = std::fs::read_to_string(poc_file).ok();
 
-        // Build prompt
         let mut prompt = format!(
-            "{base_prompt}\n\n---\n\n## Finding to Demonstrate\n\n```json\n{finding_json}\n```\n\n\
-             ## Test Infrastructure\n{test_info}\n\n\
-             ## Output Path\n\nWrite the PoC test to: `{}`\n\n\
-             CRITICAL: Write a POSITIVE PoC — the test PASSES (`[PASS]`) when the attack succeeds. \
-             Assert the bad outcome directly: `assertGt(stolen, 0)`, `assertEq(attackerBalance, victimBalance)`, etc. \
-             A test that passes proves the exploit works. Do NOT use `assert(false)` or expect the test to fail.",
+            "{}\n\n---\n\n## Finding to Demonstrate\n\n```json\n{finding_json}\n```\n\n\
+             ## Test Infrastructure\n{}\n\n## Execution\n\n{mode_text}\n\n\
+             ## Output Path\n\nWrite the PoC test to: `{}`",
+            run.base_prompt,
+            run.test_info,
             poc_file.display()
         );
-
-        // On retry, include previous failure details
-        if retry > 0 {
-            let build_error_file = logs_dir.join(format!("{}-build-error-{}.txt", finding.id, retry - 1));
-            let test_output_file = logs_dir.join(format!("{}-test-output-{}.txt", finding.id, retry - 1));
-
-            if let Ok(errors) = std::fs::read_to_string(&build_error_file) {
-                let tail: String = errors.lines().rev().take(50).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
-                prompt.push_str(&format!(
-                    "\n\n## PREVIOUS ATTEMPT FAILED TO COMPILE\n\n\
-                     The previous PoC failed to compile with these errors:\n\n```\n{tail}\n```\n\n\
-                     Fix the compilation errors. Common issues:\n\
-                     - Wrong import paths — check remappings.txt and foundry.toml\n\
-                     - Missing function signatures — read the actual contract source\n\
-                     - Wrong Solidity version — use `pragma solidity ^0.8.27;`\n\
-                     - Simplify: use `deal()` for balances, `vm.prank()` for callers"
-                ));
-            } else if let Ok(test_out) = std::fs::read_to_string(&test_output_file) {
-                let tail: String = test_out.lines().rev().take(80).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
-                prompt.push_str(&format!(
-                    "\n\n## PREVIOUS ATTEMPT COMPILED BUT ASSERTIONS FAILED ([FAIL])\n\n\
-                     The test ran but your assertions were FALSE — the attack didn't produce the expected outcome.\n\
-                     Here is the forge test output:\n\n```\n{tail}\n```\n\n\
-                     The assertion values above show the ACTUAL state. Use them to:\n\
-                     1. Fix your assertion direction (e.g. if assertGt failed, try assertLt)\n\
-                     2. Re-read the contract source to find the REAL invariant being broken\n\
-                     3. Check if you need different preconditions or a different attack path\n\
-                     4. Add console.log() calls to trace intermediate values\n\
-                     Your goal: make the test PASS ([PASS]) by correctly asserting the bad outcome."
-                ));
-            }
+        if let Some(fb) = feedback.take() {
+            prompt.push_str(&fb);
         }
 
-        // Run Claude
         let session = ClaudeSession {
-            claude_bin: claude_bin.to_path_buf(),
+            claude_bin: run.claude_bin.to_path_buf(),
             prompt,
-            max_turns,
+            max_turns: run.max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.to_path_buf(),
             model: Some(ctx.config.model.clone()),
             allowed_tools: vec![],
             timeout_minutes: Some(45),
         };
-
         let _ = session.run_with_spinner("Generating PoC...").await;
 
-        // Check if PoC file was created
         if !poc_file.exists() {
             eprintln!("    Agent did not write PoC file — extracting from log");
             extract_solidity_from_log(log_file, poc_file);
         }
-
-        if !poc_file.exists() {
-            eprintln!("    {} No PoC generated", style("⚠").yellow());
-            if retry == max_retries {
-                return "failed_to_compile".into();
+        let source = match std::fs::read_to_string(poc_file) {
+            Ok(s) if Some(&s) != before.as_ref() => s,
+            _ => {
+                eprintln!("    {} No new PoC written", style("⚠").yellow());
+                continue;
             }
-            continue;
-        }
+        };
 
-        // Find build directory
         let build_dir = find_build_dir(ctx, &finding.contract);
-
-        // Copy PoC into the forge project so forge can find it
         let forge_poc_dir = build_dir.join("test/pocs");
         let _ = std::fs::create_dir_all(&forge_poc_dir);
         let poc_in_project = forge_poc_dir.join(format!("{}.t.sol", finding.id));
         if let Err(e) = std::fs::copy(poc_file, &poc_in_project) {
-            eprintln!("    {} Failed to copy PoC into project: {e}", style("⚠").yellow());
+            eprintln!(
+                "    {} Failed to copy PoC into project: {e}",
+                style("⚠").yellow()
+            );
         }
 
-        // Attempt compilation
         eprintln!("    Compiling...");
-        let build_output = crate::tools::run_command(
-            forge_bin.to_str().unwrap_or("forge"),
-            &["build"],
-            &build_dir,
-        )
-        .await;
-
-        let build_stdout = build_output
+        let forge = run.forge_bin.to_str().unwrap_or("forge");
+        let build_output = crate::tools::run_command(forge, &["build"], &build_dir).await;
+        let build_combined = build_output
             .as_ref()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .map(|o| {
+                format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                )
+            })
             .unwrap_or_default();
-        let build_stderr = build_output
-            .as_ref()
-            .map(|o| String::from_utf8_lossy(&o.stderr).to_string())
-            .unwrap_or_default();
-        let build_combined = format!("{build_stdout}\n{build_stderr}");
-
-        let compiled = build_output
-            .as_ref()
-            .is_ok_and(|o| o.status.success())
+        let compiled = build_output.as_ref().is_ok_and(|o| o.status.success())
             || build_combined.contains("Compiler run successful");
 
-        if compiled {
-            eprintln!("    {} Compilation successful", style("✓").green());
-
-            // Run the test using a project-relative path
-            eprintln!("    Running test...");
-            let rel_poc = format!("test/pocs/{}.t.sol", finding.id);
-            let test_result = crate::tools::run_command(
-                forge_bin.to_str().unwrap_or("forge"),
-                &["test", "--match-path", &rel_poc, "-vvv"],
-                &build_dir,
-            )
-            .await;
-
-            let test_output = test_result
-                .as_ref()
-                .map(|o| {
-                    let s = String::from_utf8_lossy(&o.stdout).to_string();
-                    let e = String::from_utf8_lossy(&o.stderr).to_string();
-                    format!("{s}\n{e}")
-                })
-                .unwrap_or_default();
-
-            let status = classify_test_result(&test_output);
-            eprintln!("    Result: {status}");
-
-            if status == "compiles_and_demonstrates" || retry == max_retries {
-                return status;
-            }
-
-            // Test ran but assertions failed — save output and retry with feedback
-            let test_output_file = logs_dir.join(format!("{}-test-output-{retry}.txt", finding.id));
-            let _ = std::fs::write(&test_output_file, &test_output);
-            eprintln!("    {} Assertions failed — retrying with test output feedback", style("⚠").yellow());
-        } else {
+        if !compiled {
             eprintln!("    {} Compilation failed", style("⚠").yellow());
-
-            if retry < max_retries {
-                let error_file = logs_dir.join(format!("{}-build-error-{retry}.txt", finding.id));
-                let _ = std::fs::write(&error_file, &build_combined);
-                // Remove the broken file so it doesn't poison Pass 4's forge build
-                let _ = std::fs::remove_file(&poc_in_project);
-            } else {
-                eprintln!(
-                    "    {} All retries exhausted",
-                    style("✗").red()
-                );
-                // Remove the broken PoC from the forge project — a file that fails to compile
-                // will break subsequent passes (Pass 4 fuzzing compile, etc.)
-                let _ = std::fs::remove_file(&poc_in_project);
-                return "failed_to_compile".into();
-            }
+            let _ = std::fs::write(
+                run.logs_dir
+                    .join(format!("{}-build-error-{retry}.txt", finding.id)),
+                &build_combined,
+            );
+            // A file that fails to compile breaks later passes' forge builds.
+            let _ = std::fs::remove_file(&poc_in_project);
+            feedback = Some(compile_feedback(&build_combined));
+            last.reasons = vec!["did not compile".into()];
+            continue;
         }
+        eprintln!("    {} Compilation successful", style("✓").green());
+
+        eprintln!("    Running test...");
+        let mut args: Vec<&str> = vec!["test", "--match-path", &rel_poc, "--json", "-vv"];
+        args.extend(fork_args.iter().map(String::as_str));
+        let test_stdout = crate::tools::run_command(forge, &args, &build_dir)
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        let _ = std::fs::write(
+            run.logs_dir
+                .join(format!("{}-test-{retry}.json", finding.id)),
+            &test_stdout,
+        );
+
+        let tests = poc_evidence::parse_forge_json(&test_stdout);
+        let lint = poc_evidence::lint(&source);
+        let grade = poc_evidence::grade(&source, tests.as_deref(), &lint, run.mode);
+        eprintln!("    Result: {}", grade.status);
+        for r in &grade.reasons {
+            eprintln!("      - {r}");
+        }
+
+        last = PocOutcome {
+            status: grade.status.to_string(),
+            reasons: grade.reasons.clone(),
+            record: json!({
+                "id": finding.id,
+                "status": grade.status,
+                "reasons": grade.reasons,
+                "mode": run.mode,
+                "command": shown_command,
+                "build_dir": build_dir.strip_prefix(&ctx.audit_dir).unwrap_or(&build_dir),
+                "tests": tests.as_deref().unwrap_or_default(),
+                "capital": lint.capital,
+                "lint_flags": lint.flags,
+                "attempts": retry + 1,
+            }),
+        };
+
+        if !grade.retryable {
+            return last;
+        }
+
+        // Traces only reach the model, not the grade; -vvv text is what it can read.
+        let mut trace_args: Vec<&str> = vec!["test", "--match-path", &rel_poc, "-vvv"];
+        trace_args.extend(fork_args.iter().map(String::as_str));
+        let traces = crate::tools::run_command(forge, &trace_args, &build_dir)
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        feedback = Some(grade_feedback(&grade.reasons, &traces));
     }
 
-    "failed_to_compile".into()
+    last
 }
 
-fn classify_test_result(output: &str) -> String {
-    // Forge test names can be either snake_case (test_exploit) or camelCase (testExploit).
-    // Match both by checking for the prefix without requiring an underscore.
-    let has_test = output.contains("[PASS]") || output.contains("[FAIL]");
-    if !has_test {
-        if output.to_lowercase().contains("mainnet") || output.to_lowercase().contains("fork") {
-            return "requires_mainnet_simulation".into();
-        }
-        return "compiles_but_inconclusive".into();
-    }
-
-    if output.contains("[PASS]") {
-        // A passing PoC test means the attack succeeded — the test asserted the bad outcome
-        // and it held (e.g. assertGt(stolen, 0) passed). That IS a demonstration.
-        "compiles_and_demonstrates".into()
-    } else {
-        // [FAIL] means an assertion in the test failed — the invariant held, attack didn't work.
-        "compiles_but_inconclusive".into()
-    }
+fn tail(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
+fn compile_feedback(build_output: &str) -> String {
+    format!(
+        "\n\n## PREVIOUS ATTEMPT FAILED TO COMPILE\n\n```\n{}\n```\n\n\
+         Fix the compilation errors. Check import paths against remappings.txt and \
+         foundry.toml, and function signatures against the contract source.",
+        tail(build_output, 50)
+    )
+}
+
+/// Retry guidance after a test that compiled but did not prove impact. It must never
+/// invite weakening or flipping the impact measurement until something passes.
+fn grade_feedback(reasons: &[String], traces: &str) -> String {
+    let reasons = reasons
+        .iter()
+        .map(|r| format!("- {r}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "\n\n## PREVIOUS ATTEMPT DID NOT PROVE IMPACT\n\n{reasons}\n\n\
+         Forge output:\n\n```\n{}\n```\n\n\
+         You may fix setup mistakes: wrong preconditions, wrong signatures, missing approvals, \
+         a flagged cheatcode replaced by a real protocol call. You must NOT change what is \
+         measured: the impact is attacker balance gained or victim balance lost, computed as \
+         after minus before and logged via `console.log(\"{GAIN_MARKER}\", x)` / \
+         `console.log(\"{LOSS_MARKER}\", x)`. Do not flip or loosen assertions to make the test pass.\n\n\
+         If the source shows the attack cannot work, put \
+         `// {NOT_REPRODUCIBLE_MARKER}: <the line or check that blocks it>` at the top of the file \
+         and stop. That is a correct answer, not a failure.",
+        tail(traces, 80)
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn apply_validation_gate(
     finding: &Finding,
-    poc_status: &str,
+    outcome: &PocOutcome,
     poc_file: &Path,
     ctx: &PipelineContext,
     failed_packages: &[String],
     validated: &mut Vec<Value>,
     unverifiable: &mut Vec<Value>,
-    discarded_ids: &mut Vec<String>,
+    discarded: &mut Vec<Value>,
     stats: &mut PocStats,
 ) {
+    let poc_status = outcome.status.as_str();
     let mut finding_json = serde_json::to_value(finding).unwrap_or_default();
-    let rel_poc = poc_file
-        .strip_prefix(ctx.workspace.root())
-        .unwrap_or(poc_file)
-        .to_string_lossy()
-        .to_string();
+    let rel = |p: &Path| {
+        p.strip_prefix(ctx.workspace.root())
+            .unwrap_or(p)
+            .to_string_lossy()
+            .to_string()
+    };
+    let rel_poc = rel(poc_file);
+    finding_json["poc_reasons"] = json!(outcome.reasons);
+    if !outcome.record.is_null() {
+        finding_json["poc_record"] = json!(rel(
+            &poc_file.with_file_name(format!("{}.poc.json", finding.id))
+        ));
+    }
 
     // Reclassify compile failures when we know a package didn't build.
     // A PoC that can't compile because SubgraphService is missing is NOT the same as
@@ -447,10 +518,13 @@ fn apply_validation_gate(
             stats.inconclusive += 1;
         }
         "requires_mainnet_simulation" => {
-            eprintln!("    {} MAINNET REQUIRED — flagged for manual review", style("⚑").cyan());
+            eprintln!(
+                "    {} MAINNET REQUIRED — flagged for manual review",
+                style("⚑").cyan()
+            );
             finding_json["poc_status"] = json!(effective_status);
             validated.push(finding_json);
-            stats.validated += 1;
+            stats.inconclusive += 1;
         }
         "unverifiable_build_failure" => {
             eprintln!(
@@ -458,7 +532,9 @@ fn apply_validation_gate(
                 style("⚑").cyan(),
                 failed_packages.join(", ")
             );
-            eprintln!("      Finding preserved for manual review — fix the build and re-run to get a verdict.");
+            eprintln!(
+                "      Finding preserved for manual review — fix the build and re-run to get a verdict."
+            );
             finding_json["poc_status"] = json!("unverifiable_build_failure");
             finding_json["unverifiable_reason"] = json!(format!(
                 "PoC compilation failed — the following packages did not build and may be required: {}. \
@@ -469,12 +545,9 @@ fn apply_validation_gate(
             stats.unverifiable += 1;
         }
         _ => {
-            eprintln!(
-                "    {} DISCARDED ({})",
-                style("✗").red(),
-                effective_status
-            );
-            discarded_ids.push(finding.id.clone());
+            eprintln!("    {} DISCARDED ({})", style("✗").red(), effective_status);
+            finding_json["poc_status"] = json!(effective_status);
+            discarded.push(finding_json);
             stats.discarded += 1;
         }
     }
@@ -492,7 +565,10 @@ fn find_build_dir(ctx: &PipelineContext, contract: &str) -> PathBuf {
         let contracts_dir = pkg_path.join("contracts");
         if contracts_dir.exists() {
             if let Ok(files) = glob_sol_files(&contracts_dir) {
-                if files.iter().any(|f| f.file_name().unwrap_or_default().to_string_lossy() == contract_file) {
+                if files
+                    .iter()
+                    .any(|f| f.file_name().unwrap_or_default().to_string_lossy() == contract_file)
+                {
                     return pkg_path;
                 }
             }
