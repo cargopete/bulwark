@@ -45,6 +45,18 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     let claude_bin = ctx.config.resolve_tool("claude")?;
 
+    let findings = match &ctx.config.program {
+        Some(program) => {
+            super::scope::gate(ctx, program, findings, &allowance, &claude_bin).await?
+        }
+        None => findings,
+    };
+    if findings.is_empty() {
+        eprintln!("  All findings rejected by the scope check — nothing to validate.");
+        write_json(&ctx.workspace.validated_findings(), &json!([]))?;
+        return Ok("0 findings in scope".into());
+    }
+
     // ── Pre-filter: false positive check ─────────────────────────
     let findings = if ctx.config.passes.poc.fp_check {
         eprintln!(

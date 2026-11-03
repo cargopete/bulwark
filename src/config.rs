@@ -32,6 +32,10 @@ pub struct Config {
 
     #[serde(default)]
     pub budget: BudgetConfig,
+
+    /// The bounty program; without it the scope check is skipped.
+    #[serde(default)]
+    pub program: Option<crate::program::ProgramConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,11 +59,13 @@ fn default_max_usd() -> f64 {
 
 pub const OPUS: &str = "claude-opus-5-5";
 pub const SONNET: &str = "claude-sonnet-5-5";
+pub const HAIKU: &str = "claude-haiku-5-5";
 
 /// Stages that run a Claude session, besides the Pass 2 agents themselves.
 pub const STAGES: &[&str] = &[
     "scv_scan",
     "variant_analysis",
+    "scope_check",
     "fp_check",
     "poc",
     "fuzzing",
@@ -71,6 +77,7 @@ pub const STAGES: &[&str] = &[
 fn default_stage_model(stage: &str) -> &'static str {
     match stage {
         "red" | "gold" | "fp_check" | "poc" | "review" => OPUS,
+        "scope_check" => HAIKU,
         _ => SONNET,
     }
 }

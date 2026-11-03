@@ -204,7 +204,10 @@ async fn run_single_agent(
     budget_usd: Option<f64>,
 ) -> Result<usize> {
     let prompt_file = ctx.resolve_prompt_path(&format!("{agent_name}-agent.md"));
-    let prompt = std::fs::read_to_string(&prompt_file)?;
+    let mut prompt = std::fs::read_to_string(&prompt_file)?;
+    if let Some(program) = &ctx.config.program {
+        prompt.push_str(&program.prompt_section());
+    }
     let output_file = ctx.workspace.agent_raw_output(agent_name);
     let log_file = ctx.workspace.agent_log(agent_name);
 
