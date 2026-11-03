@@ -303,6 +303,72 @@ text = "Temporary freezing of funds"
         assert_eq!(rule_check(&program(), &mut f).unwrap_err().rule, "asset");
     }
 
+    /// Spends real money (well under a cent on Haiku): `cargo test -- --ignored live_classifier`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_classifier_separates_exclusions() {
+        let dir = tempfile::tempdir().unwrap();
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[target]
+repo = "x"
+scope = ["src"]
+core_contracts = []
+[program]
+[[program.assets]]
+name = "Vault"
+[[program.impacts]]
+severity = "Critical"
+text = "Direct theft of any user funds"
+[program.out_of_scope]
+program_specific = ["Frontrunning, including back-running and sandwich attacks"]
+"#,
+        )
+        .unwrap();
+        let workspace = crate::workspace::Workspace::new(dir.path(), "ws");
+        workspace.init().unwrap();
+        let ledger =
+            crate::budget::Ledger::open(workspace.cost_ledger(), Some(0.50), true).unwrap();
+        let ctx = PipelineContext {
+            config: config.clone(),
+            workspace,
+            audit_dir: dir.path().to_path_buf(),
+            bulwark_root: dir.path().to_path_buf(),
+            bulwark_install: dir.path().to_path_buf(),
+            ledger,
+        };
+        let mk = |id: &str, title: &str, scenario: &str| {
+            let mut f = finding("Vault.sol", Some("I-1"));
+            f.id = id.into();
+            f.title = title.into();
+            f.attack_scenario = scenario.into();
+            f
+        };
+        let findings = vec![
+            mk("F-001", "Owner can sweep all deposits",
+               "The owner calls sweep(owner) and receives every user's deposit; requires the owner key."),
+            mk("F-002", "Withdrawal sandwich",
+               "An attacker watches the mempool for a large withdraw() and front-runs it with deposit(), then back-runs with withdraw(), capturing the price move."),
+            mk("F-003", "Missing auth on withdrawFor",
+               "Any outsider calls withdrawFor(victim, attacker) and the Vault sends the victim's balance to the attacker; no role needed."),
+        ];
+        let program = config.program.as_ref().unwrap();
+        let allowance = ctx.allowance("poc");
+        let claude = which::which("claude").unwrap();
+        let kept = gate(&ctx, program, findings, &allowance, &claude).await.unwrap();
+        let ids: Vec<&str> = kept.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["F-003"]);
+        let rejected: Vec<Value> =
+            serde_json::from_str(&std::fs::read_to_string(ctx.workspace.rejected_findings()).unwrap())
+                .unwrap();
+        let rules: Vec<&str> = rejected
+            .iter()
+            .map(|r| r["scope_rejection"]["rule"].as_str().unwrap())
+            .collect();
+        assert_eq!(rules, vec!["D-1", "P-1"]);
+        eprintln!("spent ${:.4}", ctx.ledger.spent());
+    }
+
     #[test]
     fn classifier_output_parses_from_prose() {
         let text = r#"Here you go:
