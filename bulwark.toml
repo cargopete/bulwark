@@ -43,6 +43,10 @@ max_turns = 30
 max_retries = 2
 fp_check = true              # Pre-filter findings with false-positive check
 fp_check_max_turns = 15
+# Fork mode: PoCs run against deployed contracts at a pinned block. Without it every
+# PoC is at most inconclusive.
+# fork_rpc_env = "BULWARK_FORK_RPC"
+# fork_block = 21_000_000
 
 [passes.fuzzing]
 enabled = true

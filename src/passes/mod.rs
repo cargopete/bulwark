@@ -2,6 +2,7 @@ pub mod agents;
 pub mod formal;
 pub mod fuzzing;
 pub mod poc;
+pub mod poc_evidence;
 pub mod recon;
 pub mod review;
 pub mod stub;
