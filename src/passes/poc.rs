@@ -301,7 +301,7 @@ async fn generate_and_validate_poc(
             max_turns: run.max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.to_path_buf(),
-            model: Some(ctx.config.model.clone()),
+            model: Some(ctx.config.model_for("poc")),
             allowed_tools: vec![],
             timeout_minutes: Some(45),
         };
@@ -711,7 +711,7 @@ async fn run_fp_check_filter(
             max_turns: ctx.config.passes.poc.fp_check_max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.clone(),
-            model: Some(ctx.config.model.clone()),
+            model: Some(ctx.config.model_for("fp_check")),
             allowed_tools: vec![],
             timeout_minutes: Some(15),
         };

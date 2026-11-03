@@ -473,7 +473,19 @@ math_sensitive = [
     # List contracts with complex arithmetic for extra scrutiny
 ]
 
-model = "haiku"
+# Claude model per stage; these are the defaults. Pass 2 agents are keyed by name.
+# A table, so it must sit after every top-level key.
+# [models]
+# red              = "claude-opus-5-5"
+# gold             = "claude-opus-5-5"
+# blue             = "claude-sonnet-5-5"
+# scv_scan         = "claude-sonnet-5-5"
+# variant_analysis = "claude-sonnet-5-5"
+# fp_check         = "claude-opus-5-5"
+# poc              = "claude-opus-5-5"
+# fuzzing          = "claude-sonnet-5-5"
+# formal           = "claude-sonnet-5-5"
+# review           = "claude-opus-5-5"
 
 [workspace]
 path = "audit-workspace"
@@ -503,7 +515,6 @@ enabled = true
 fuzz_runs = 10_000
 invariant_depth = 50
 max_turns = 40
-model = "sonnet"
 
 [passes.formal]
 enabled = true
@@ -511,7 +522,6 @@ solver_timeout = 300
 loop_bound = 5
 target_properties = []
 max_turns = 30
-model = "sonnet"
 
 [passes.review]
 enabled = true

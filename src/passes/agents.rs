@@ -208,7 +208,7 @@ async fn run_single_agent(
         max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: log_file.clone(),
-        model: Some(ctx.config.model.clone()),
+        model: Some(ctx.config.model_for(agent_name)),
         allowed_tools: vec![],
         timeout_minutes: None, // Pass 2 uses its own tokio::time::timeout wrapper
     };
@@ -323,7 +323,7 @@ async fn run_variant_analysis(
             max_turns: ctx.config.passes.agents.variant_max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file,
-            model: Some(ctx.config.model.clone()),
+            model: Some(ctx.config.model_for("variant_analysis")),
             allowed_tools: vec![],
             timeout_minutes: Some(20),
         };

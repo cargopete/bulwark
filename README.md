@@ -150,15 +150,20 @@ arithmetic model — the violation is at the protocol interaction level, not the
 
 ## Model Configuration
 
+Each stage picks its own model. Opus 5.5 runs where a wrong answer loses a real bug
+(RED, GOLD, fp-check, PoC generation, review); Sonnet 5.5 runs the rest. Override any
+stage in a `[models]` table:
+
 ```toml
-model = "haiku"                    # Global default (cheapest, used for most passes)
-
-[passes.fuzzing]
-model = "sonnet"                   # Better at generating compilable Solidity tests
-
-[passes.formal]
-model = "sonnet"                   # Better at generating symbolic test structure
+[models]
+red    = "claude-opus-5-5"
+blue   = "claude-sonnet-5-5"
+review = "claude-fable-5-1"
 ```
+
+Stages: `red`, `blue`, `gold` (or any agent name), `scv_scan`, `variant_analysis`,
+`fp_check`, `poc`, `fuzzing`, `formal`, `review`. An unknown key is an error. A top-level
+`model` still applies to every stage not named.
 
 Swap `haiku` → `sonnet` globally for higher-quality agent analysis at ~4× the cost.
 
@@ -247,8 +252,6 @@ branch = "main"
 scope  = ["packages/horizon", "packages/subgraph-service"]
 core_contracts = ["HorizonStaking", "GraphPayments", "PaymentsEscrow"]
 
-model = "haiku"   # Global default; "sonnet" or "opus" for more depth
-
 [passes.recon]
 scv_scan          = true
 scv_scan_max_turns = 20
@@ -267,14 +270,12 @@ fp_check    = true
 [passes.fuzzing]
 fuzz_runs      = 10_000
 max_turns      = 40
-model          = "sonnet"
 
 [passes.formal]
 solver_timeout     = 300
 loop_bound         = 5
 target_properties  = ["P-1", "P-10", "P-15", "P-16", "P-19"]
 max_turns          = 30
-model              = "sonnet"
 
 [passes.review]
 max_turns = 60
