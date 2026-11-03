@@ -40,6 +40,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    // init creates bulwark.toml, so it cannot wait for one to load.
+    if let Commands::Init(args) = cli.command {
+        return cmd_init(args);
+    }
+
     // Resolve config: CWD first, then $BULWARK_ROOT fallback
     let config_path = if cli.config.exists() {
         cli.config.clone()
@@ -93,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Findings(args) => cmd_findings(config, audit_dir, args)?,
         Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
-        Commands::Init(args) => cmd_init(args)?,
+        Commands::Init(_) => unreachable!("handled before the config loads"),
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
         Commands::Program(cli::ProgramCmd::Import { url }) => {
