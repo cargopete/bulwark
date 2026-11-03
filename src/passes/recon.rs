@@ -849,7 +849,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         max_turns: ctx.config.passes.recon.scv_scan_max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: log_file.clone(),
-        model: Some(ctx.config.model.clone()),
+        model: Some(ctx.config.model_for("scv_scan")),
         allowed_tools: vec![],
         timeout_minutes: Some(30),
     };

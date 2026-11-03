@@ -224,7 +224,7 @@ async fn run_adversarial_review(
         max_turns: ctx.config.passes.review.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("adversarial-review.log"),
-        model: Some(ctx.config.model.clone()),
+        model: Some(ctx.config.model_for("review")),
         allowed_tools: vec![],
         timeout_minutes: Some(90),
     };

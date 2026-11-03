@@ -18,8 +18,19 @@ math_sensitive = [
     "PaymentsEscrow",
 ]
 
-# Claude model for AI passes: "haiku" (cheapest), "sonnet", or "opus"
-model = "haiku"
+# Claude model per stage; these are the defaults. Pass 2 agents are keyed by name.
+# A table, so it must sit after every top-level key.
+# [models]
+# red              = "claude-opus-5-5"
+# gold             = "claude-opus-5-5"
+# blue             = "claude-sonnet-5-5"
+# scv_scan         = "claude-sonnet-5-5"
+# variant_analysis = "claude-sonnet-5-5"
+# fp_check         = "claude-opus-5-5"
+# poc              = "claude-opus-5-5"
+# fuzzing          = "claude-sonnet-5-5"
+# formal           = "claude-sonnet-5-5"
+# review           = "claude-opus-5-5"
 
 [workspace]
 path = "audit-workspace"
@@ -55,7 +66,6 @@ invariant_depth = 50
 medusa_timeout = 3600
 echidna_limit = 500_000
 max_turns = 40
-model = "sonnet"               # Sonnet for test generation quality
 
 [passes.formal]
 enabled = true
@@ -63,7 +73,6 @@ solver_timeout = 300
 loop_bound = 5
 target_properties = ["P-1", "P-10", "P-15", "P-16", "P-19"]
 max_turns = 30
-model = "sonnet"               # Sonnet for test generation quality
 
 [passes.review]
 enabled = true

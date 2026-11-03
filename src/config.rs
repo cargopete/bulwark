@@ -1,5 +1,6 @@
 use crate::error::{BulwarkError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,10 +22,35 @@ pub struct Config {
     #[serde(default)]
     pub schemas: SchemasConfig,
 
-    /// Claude model for AI passes. Defaults to "haiku" (cheapest).
-    /// Options: "haiku", "sonnet", "opus"
-    #[serde(default = "default_model")]
-    pub model: String,
+    /// Legacy single model for every stage not named in `[models]`.
+    #[serde(default)]
+    pub model: Option<String>,
+
+    /// Claude model per stage, keyed by `STAGES` or an agent name.
+    #[serde(default)]
+    pub models: BTreeMap<String, String>,
+}
+
+pub const OPUS: &str = "claude-opus-5-5";
+pub const SONNET: &str = "claude-sonnet-5-5";
+
+/// Stages that run a Claude session, besides the Pass 2 agents themselves.
+pub const STAGES: &[&str] = &[
+    "scv_scan",
+    "variant_analysis",
+    "fp_check",
+    "poc",
+    "fuzzing",
+    "formal",
+    "review",
+];
+
+/// Opus where a wrong answer loses a real bug: discovery, the discard gate, PoCs, review.
+fn default_stage_model(stage: &str) -> &'static str {
+    match stage {
+        "red" | "gold" | "fp_check" | "poc" | "review" => OPUS,
+        _ => SONNET,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,9 +410,6 @@ fn default_variant_turns() -> u32 {
 fn default_fp_check_turns() -> u32 {
     15
 }
-fn default_model() -> String {
-    "haiku".into()
-}
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
@@ -394,7 +417,44 @@ impl Config {
             BulwarkError::Config(format!("failed to read config at {}: {e}", path.display()))
         })?;
         let config: Config = toml::from_str(&content)?;
+        config.check_models()?;
         Ok(config)
+    }
+
+    fn check_models(&self) -> Result<()> {
+        let known =
+            |k: &str| STAGES.contains(&k) || self.passes.agents.agents.iter().any(|a| a == k);
+        let unknown: Vec<&str> = self
+            .models
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !known(k))
+            .collect();
+        if unknown.is_empty() {
+            return Ok(());
+        }
+        Err(BulwarkError::Config(format!(
+            "unknown [models] stage(s): {}; known: {}, plus agents {}",
+            unknown.join(", "),
+            STAGES.join(", "),
+            self.passes.agents.agents.join(", ")
+        )))
+    }
+
+    /// Model for a stage: `[models]`, then the pass's own override, then the legacy
+    /// top-level `model`, then the built-in default.
+    pub fn model_for(&self, stage: &str) -> String {
+        let pass_override = match stage {
+            "fuzzing" => self.passes.fuzzing.model.as_ref(),
+            "formal" => self.passes.formal.model.as_ref(),
+            _ => None,
+        };
+        self.models
+            .get(stage)
+            .or(pass_override)
+            .or(self.model.as_ref())
+            .cloned()
+            .unwrap_or_else(|| default_stage_model(stage).to_string())
     }
 
     /// Resolve tool path: use configured override, or fall back to `which`.
@@ -549,5 +609,61 @@ core_contracts = ["Test"]
         assert_eq!(config.passes.agents.variant_max_turns, 15);
         assert!(config.passes.poc.fp_check);
         assert_eq!(config.passes.poc.fp_check_max_turns, 15);
+    }
+
+    fn with(extra: &str) -> Result<Config> {
+        let config: Config = toml::from_str(&format!("{extra}\n{MINIMAL_TOML}")).expect("parse");
+        config.check_models().map(|_| config)
+    }
+
+    #[test]
+    fn stage_defaults_put_opus_on_discovery_and_proof() {
+        let c = with("").unwrap();
+        for s in ["red", "gold", "fp_check", "poc", "review"] {
+            assert_eq!(c.model_for(s), OPUS, "{s}");
+        }
+        for s in ["blue", "scv_scan", "variant_analysis", "fuzzing", "formal"] {
+            assert_eq!(c.model_for(s), SONNET, "{s}");
+        }
+    }
+
+    #[test]
+    fn models_table_beats_pass_override_beats_top_level() {
+        let c: Config = toml::from_str(&format!(
+            "model = \"haiku\"\n{MINIMAL_TOML}\n[models]\nred = \"x\"\nfuzzing = \"y\"\n\
+             [passes.fuzzing]\nmodel = \"z\"\n[passes.formal]\nmodel = \"w\"\n"
+        ))
+        .unwrap();
+        assert_eq!(c.model_for("red"), "x");
+        assert_eq!(c.model_for("fuzzing"), "y");
+        assert_eq!(c.model_for("formal"), "w");
+        assert_eq!(c.model_for("review"), "haiku");
+    }
+
+    #[test]
+    fn unknown_models_key_is_refused() {
+        let err = toml::from_str::<Config>(&format!("{MINIMAL_TOML}\n[models]\nrde = \"x\"\n"))
+            .unwrap()
+            .check_models()
+            .unwrap_err();
+        assert!(err.to_string().contains("rde"));
+    }
+
+    #[test]
+    fn custom_agent_names_are_valid_keys() {
+        let c: Config = toml::from_str(&format!(
+            "{MINIMAL_TOML}\n[passes.agents]\nagents = [\"purple\"]\n[models]\npurple = \"x\"\n"
+        ))
+        .unwrap();
+        assert!(c.check_models().is_ok());
+        assert_eq!(c.model_for("purple"), "x");
+    }
+
+    #[test]
+    fn shipped_config_loads() {
+        let c: Config =
+            toml::from_str(include_str!("../bulwark.toml")).expect("bulwark.toml parses");
+        c.check_models().unwrap();
+        assert_eq!(c.model_for("red"), OPUS);
     }
 }
