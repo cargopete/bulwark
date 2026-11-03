@@ -456,10 +456,8 @@ fn sanitize_sol_unicode(dir: &std::path::Path) {
         if path.extension().is_some_and(|e| e == "sol") {
             let Ok(content) = std::fs::read_to_string(&path) else { continue };
             let sanitized = content
-                .replace('\u{201C}', "\"") // left double quotation mark "
-                .replace('\u{201D}', "\"") // right double quotation mark "
-                .replace('\u{2018}', "'")  // left single quotation mark '
-                .replace('\u{2019}', "'")  // right single quotation mark '
+                .replace(['\u{201C}', '\u{201D}'], "\"") // curly double quotes
+                .replace(['\u{2018}', '\u{2019}'], "'") // curly single quotes
                 .replace('\u{2014}', "--") // em dash —
                 .replace('\u{2013}', "-")  // en dash –
                 .replace('\u{2026}', "..."); // horizontal ellipsis …

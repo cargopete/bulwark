@@ -589,7 +589,7 @@ fn read_foundry_out_dir(build_dir: &Path) -> String {
         for line in content.lines() {
             let trimmed = line.trim();
             if trimmed.starts_with("out") {
-                if let Some(val) = trimmed.splitn(2, '=').nth(1) {
+                if let Some(val) = trimmed.split_once('=').map(|(_, v)| v) {
                     let dir = val.trim().trim_matches('\'').trim_matches('"').to_string();
                     if !dir.is_empty() {
                         return dir;

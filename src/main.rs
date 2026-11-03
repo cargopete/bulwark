@@ -454,7 +454,7 @@ fn cmd_init(args: cli::InitArgs) -> anyhow::Result<()> {
         .next()
         .unwrap_or("audit");
 
-    let project_dir = if path == PathBuf::from(".") {
+    let project_dir = if path.as_path() == std::path::Path::new(".") {
         std::env::current_dir()?
     } else {
         path.clone()
