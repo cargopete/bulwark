@@ -445,7 +445,17 @@ impl Config {
         let content = std::fs::read_to_string(path).map_err(|e| {
             BulwarkError::Config(format!("failed to read config at {}: {e}", path.display()))
         })?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        // `bulwark program import` writes program.toml beside the config.
+        let imported = path.with_file_name("program.toml");
+        if config.program.is_none() && imported.exists() {
+            #[derive(Deserialize)]
+            struct Wrap {
+                program: crate::program::ProgramConfig,
+            }
+            let w: Wrap = toml::from_str(&std::fs::read_to_string(&imported)?)?;
+            config.program = Some(w.program);
+        }
         config.check_models()?;
         Ok(config)
     }

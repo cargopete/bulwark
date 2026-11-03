@@ -45,6 +45,19 @@ pub enum Commands {
 
     /// Authenticate Claude Code (runs `claude login`)
     Login,
+
+    /// Bounty program scope
+    #[command(subcommand)]
+    Program(ProgramCmd),
+}
+
+#[derive(Subcommand)]
+pub enum ProgramCmd {
+    /// Import an Immunefi scope page into program.toml beside bulwark.toml
+    Import {
+        /// e.g. https://immunefi.com/bug-bounty/<slug>/scope/
+        url: String,
+    },
 }
 
 #[derive(clap::Args)]
