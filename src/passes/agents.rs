@@ -71,6 +71,10 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     // Launch agents in parallel
     let mut set = JoinSet::new();
     let agent_count = agents.len();
+    // Variant analysis draws on the same allowance after the agents, so it takes one share.
+    let allowance = ctx.allowance("agents");
+    let variant_share = usize::from(ctx.config.passes.agents.variant_analysis);
+    let agent_cap = allowance.split(agent_count + variant_share);
 
     for agent_name in &agents {
         let ctx = ctx.clone();
@@ -83,7 +87,7 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         pb.enable_steady_tick(Duration::from_millis(120));
 
         set.spawn(async move {
-            let result = run_single_agent(&ctx, &name, &claude_bin, max_turns).await;
+            let result = run_single_agent(&ctx, &name, &claude_bin, max_turns, agent_cap).await;
             match &result {
                 Ok(count) => pb.finish_with_message(format!("{count} findings")),
                 Err(e) => pb.finish_with_message(format!("failed: {e}")),
@@ -168,7 +172,7 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     // ── Variant analysis post-processing ─────────────────────────
     if ctx.config.passes.agents.variant_analysis {
         eprintln!("\n  Running variant analysis on high/critical findings...");
-        match run_variant_analysis(ctx, &merge_result.findings).await {
+        match run_variant_analysis(ctx, &merge_result.findings, &allowance).await {
             Ok(count) if count > 0 => {
                 eprintln!(
                     "  {} variant-analysis found {count} additional instances",
@@ -196,6 +200,7 @@ async fn run_single_agent(
     agent_name: &str,
     claude_bin: &Path,
     max_turns: u32,
+    budget_usd: Option<f64>,
 ) -> Result<usize> {
     let prompt_file = ctx.resolve_prompt_path(&format!("{agent_name}-agent.md"));
     let prompt = std::fs::read_to_string(&prompt_file)?;
@@ -211,6 +216,9 @@ async fn run_single_agent(
         model: Some(ctx.config.model_for(agent_name)),
         allowed_tools: vec![],
         timeout_minutes: None, // Pass 2 uses its own tokio::time::timeout wrapper
+        label: format!("agent:{agent_name}"),
+        budget_usd,
+        ledger: Some(ctx.ledger.clone()),
     };
 
     let result = session.run().await?;
@@ -261,6 +269,7 @@ fn extract_and_save(log_file: &Path, output_file: &Path) -> Result<usize> {
 async fn run_variant_analysis(
     ctx: &PipelineContext,
     findings: &[Finding],
+    allowance: &crate::budget::Allowance,
 ) -> crate::error::Result<usize> {
     use crate::error::BulwarkError;
     use crate::findings::Severity;
@@ -300,7 +309,7 @@ async fn run_variant_analysis(
         .collect::<Vec<_>>()
         .join(" and ");
 
-    for finding in &high_findings {
+    for (idx, finding) in high_findings.iter().enumerate() {
         let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
         let log_file = logs_dir.join(format!("{}-variant.log", finding.id));
         let variant_file = ctx
@@ -326,6 +335,9 @@ async fn run_variant_analysis(
             model: Some(ctx.config.model_for("variant_analysis")),
             allowed_tools: vec![],
             timeout_minutes: Some(20),
+            label: format!("variant:{}", finding.id),
+            budget_usd: allowance.split(high_findings.len() - idx),
+            ledger: Some(ctx.ledger.clone()),
         };
 
         let _ = session

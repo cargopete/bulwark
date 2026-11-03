@@ -2,6 +2,7 @@
 // Suppress collapsible_if: clippy suggests `let` chains which are unstable (rust#53667)
 #![allow(clippy::collapsible_if)]
 
+mod budget;
 mod cli;
 mod config;
 mod docker;
@@ -326,6 +327,7 @@ fn cmd_report(
     args: cli::ReportArgs,
 ) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
+    let ws_cost = ws.cost_ledger();
     let bulwark_root = std::env::var("BULWARK_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
@@ -339,6 +341,7 @@ fn cmd_report(
         audit_dir,
         bulwark_root,
         bulwark_install,
+        ledger: budget::Ledger::open(ws_cost, None, false)?,
     };
 
     eprintln!(
@@ -486,6 +489,11 @@ math_sensitive = [
 # fuzzing          = "claude-sonnet-5-5"
 # formal           = "claude-sonnet-5-5"
 # review           = "claude-opus-5-5"
+
+[budget]
+# Hard cap on Claude spend for one run. Each pass gets its share of what is left;
+# PoCs are attempted highest severity first. Spend is recorded in <workspace>/cost.json.
+max_usd = 20.0
 
 [workspace]
 path = "audit-workspace"

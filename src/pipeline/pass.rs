@@ -1,6 +1,8 @@
+use crate::budget::{Allowance, Ledger};
 use crate::config::Config;
 use crate::workspace::Workspace;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Shared context passed to every pipeline pass.
 #[derive(Clone)]
@@ -13,9 +15,24 @@ pub struct PipelineContext {
     /// Bulwark install directory — contains the built-in generic `prompts/` and `schemas/`.
     /// Resolved from `$BULWARK_INSTALL` env var; falls back to `bulwark_root`.
     pub bulwark_install: PathBuf,
+    pub ledger: Arc<Ledger>,
 }
 
 impl PipelineContext {
+    /// This pass's slice of the run budget.
+    pub fn allowance(&self, pass: &str) -> Allowance {
+        let p = &self.config.passes;
+        self.ledger.allowance(pass, |name| match name {
+            "recon" => p.recon.enabled,
+            "agents" => p.agents.enabled,
+            "poc" => p.poc.enabled,
+            "fuzzing" => p.fuzzing.enabled,
+            "formal" => p.formal.enabled,
+            "review" => p.review.enabled,
+            _ => false,
+        })
+    }
+
     /// Resolve a prompt file path.
     ///
     /// Checks the project directory (`bulwark_root/prompts/`) first — allowing per-project

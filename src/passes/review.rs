@@ -227,6 +227,9 @@ async fn run_adversarial_review(
         model: Some(ctx.config.model_for("review")),
         allowed_tools: vec![],
         timeout_minutes: Some(90),
+        label: "review".into(),
+        budget_usd: ctx.allowance("review").split(1),
+        ledger: Some(ctx.ledger.clone()),
     };
 
     let _ = session
