@@ -6,9 +6,9 @@ use crate::error::Result;
 use crate::findings::Finding;
 use crate::pipeline::pass::PipelineContext;
 use crate::program::ProgramConfig;
-use crate::tools::claude::{try_parse_json_array, ClaudeSession};
+use crate::tools::claude::{ClaudeSession, try_parse_json_array};
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 /// Part of Pass 3's money the classifier may use; it is one short session.
@@ -33,7 +33,10 @@ pub fn rule_check(program: &ProgramConfig, f: &mut Finding) -> std::result::Resu
         || path.ends_with(".s.sol")
         || path.split('/').any(|p| p == "test" || p == "script")
     {
-        return Err(reject("D-8", format!("{} is a test or script file", f.contract)));
+        return Err(reject(
+            "D-8",
+            format!("{} is a test or script file", f.contract),
+        ));
     }
     let asset = f
         .extra
@@ -42,7 +45,10 @@ pub fn rule_check(program: &ProgramConfig, f: &mut Finding) -> std::result::Resu
         .unwrap_or(&f.contract)
         .to_string();
     if !program.has_asset(&asset) || !program.has_asset(&f.contract) {
-        return Err(reject("asset", format!("{} is not a listed asset", f.contract)));
+        return Err(reject(
+            "asset",
+            format!("{} is not a listed asset", f.contract),
+        ));
     }
     let cited = f.extra.get("impact").and_then(|i| i.as_str()).unwrap_or("");
     let Some(impact) = program.impact(cited) else {
@@ -279,9 +285,16 @@ text = "Temporary freezing of funds"
     #[test]
     fn missing_or_unknown_impact_is_rejected() {
         let p = program();
-        assert_eq!(rule_check(&p, &mut finding("Vault.sol", None)).unwrap_err().rule, "impact");
         assert_eq!(
-            rule_check(&p, &mut finding("Vault.sol", Some("I-9"))).unwrap_err().rule,
+            rule_check(&p, &mut finding("Vault.sol", None))
+                .unwrap_err()
+                .rule,
+            "impact"
+        );
+        assert_eq!(
+            rule_check(&p, &mut finding("Vault.sol", Some("I-9")))
+                .unwrap_err()
+                .rule,
             "impact"
         );
     }
@@ -289,9 +302,16 @@ text = "Temporary freezing of funds"
     #[test]
     fn unlisted_asset_and_test_files_are_rejected() {
         let p = program();
-        assert_eq!(rule_check(&p, &mut finding("Router.sol", Some("I-1"))).unwrap_err().rule, "asset");
         assert_eq!(
-            rule_check(&p, &mut finding("test/Vault.t.sol", Some("I-1"))).unwrap_err().rule,
+            rule_check(&p, &mut finding("Router.sol", Some("I-1")))
+                .unwrap_err()
+                .rule,
+            "asset"
+        );
+        assert_eq!(
+            rule_check(&p, &mut finding("test/Vault.t.sol", Some("I-1")))
+                .unwrap_err()
+                .rule,
             "D-8"
         );
     }
@@ -345,22 +365,34 @@ program_specific = ["Frontrunning, including back-running and sandwich attacks"]
             f
         };
         let findings = vec![
-            mk("F-001", "Owner can sweep all deposits",
-               "The owner calls sweep(owner) and receives every user's deposit; requires the owner key."),
-            mk("F-002", "Withdrawal sandwich",
-               "An attacker watches the mempool for a large withdraw() and front-runs it with deposit(), then back-runs with withdraw(), capturing the price move."),
-            mk("F-003", "Missing auth on withdrawFor",
-               "Any outsider calls withdrawFor(victim, attacker) and the Vault sends the victim's balance to the attacker; no role needed."),
+            mk(
+                "F-001",
+                "Owner can sweep all deposits",
+                "The owner calls sweep(owner) and receives every user's deposit; requires the owner key.",
+            ),
+            mk(
+                "F-002",
+                "Withdrawal sandwich",
+                "An attacker watches the mempool for a large withdraw() and front-runs it with deposit(), then back-runs with withdraw(), capturing the price move.",
+            ),
+            mk(
+                "F-003",
+                "Missing auth on withdrawFor",
+                "Any outsider calls withdrawFor(victim, attacker) and the Vault sends the victim's balance to the attacker; no role needed.",
+            ),
         ];
         let program = config.program.as_ref().unwrap();
         let allowance = ctx.allowance("poc");
         let claude = which::which("claude").unwrap();
-        let kept = gate(&ctx, program, findings, &allowance, &claude).await.unwrap();
+        let kept = gate(&ctx, program, findings, &allowance, &claude)
+            .await
+            .unwrap();
         let ids: Vec<&str> = kept.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(ids, vec!["F-003"]);
-        let rejected: Vec<Value> =
-            serde_json::from_str(&std::fs::read_to_string(ctx.workspace.rejected_findings()).unwrap())
-                .unwrap();
+        let rejected: Vec<Value> = serde_json::from_str(
+            &std::fs::read_to_string(ctx.workspace.rejected_findings()).unwrap(),
+        )
+        .unwrap();
         let rules: Vec<&str> = rejected
             .iter()
             .map(|r| r["scope_rejection"]["rule"].as_str().unwrap())
@@ -376,6 +408,9 @@ program_specific = ["Frontrunning, including back-running and sandwich attacks"]
  {"id":"F-002","excluded":false,"rule":null,"reason":"outsider can call it"}]
 done"#;
         let v = parse_verdicts(&first_json_array(text).unwrap());
-        assert_eq!(v, vec![("F-001".into(), "D-1".into(), "needs the owner key".into())]);
+        assert_eq!(
+            v,
+            vec![("F-001".into(), "D-1".into(), "needs the owner key".into())]
+        );
     }
 }

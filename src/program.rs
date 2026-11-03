@@ -73,15 +73,27 @@ fn default_kind() -> String {
 
 /// Immunefi v2.3 default exclusions, always applied.
 pub const DEFAULT_EXCLUSIONS: &[(&str, &str)] = &[
-    ("D-1", "Attacks that require access to privileged addresses (governance, owner, admin, operator roles) or leaked keys"),
+    (
+        "D-1",
+        "Attacks that require access to privileged addresses (governance, owner, admin, operator roles) or leaked keys",
+    ),
     ("D-2", "Centralization risks"),
     ("D-3", "Sybil attacks"),
-    ("D-4", "Basic economic or governance attacks, such as a 51% attack"),
-    ("D-5", "Incorrect data supplied by third-party oracles (oracle manipulation and flash-loan attacks remain in scope)"),
+    (
+        "D-4",
+        "Basic economic or governance attacks, such as a 51% attack",
+    ),
+    (
+        "D-5",
+        "Incorrect data supplied by third-party oracles (oracle manipulation and flash-loan attacks remain in scope)",
+    ),
     ("D-6", "Lack of liquidity"),
     ("D-7", "Best-practice recommendations and feature requests"),
     ("D-8", "Issues only in test or configuration files"),
-    ("D-9", "Findings without a demonstrated impact on funds or protocol operation"),
+    (
+        "D-9",
+        "Findings without a demonstrated impact on funds or protocol operation",
+    ),
 ];
 
 impl ProgramConfig {
