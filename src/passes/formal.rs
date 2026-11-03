@@ -416,6 +416,9 @@ async fn generate_symbolic_tests(
             "Glob".into(), "Grep".into(), "Bash".into(),
         ],
         timeout_minutes: Some(60),
+        label: "formal".into(),
+        budget_usd: ctx.allowance("formal").split(1),
+        ledger: Some(ctx.ledger.clone()),
     };
 
     let _ = session.run_with_spinner("Generating symbolic tests...").await;

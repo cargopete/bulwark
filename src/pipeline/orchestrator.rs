@@ -1,3 +1,4 @@
+use crate::budget::Ledger;
 use crate::config::Config;
 use crate::error::{BulwarkError, Result};
 use crate::pipeline::checkpoint::PipelineStatus;
@@ -33,6 +34,14 @@ impl Orchestrator {
             .map(PathBuf::from)
             .unwrap_or_else(|_| bulwark_root.clone());
 
+        // Starting at pass 1 is a new run; a later start continues the last run's spend.
+        let max = config.budget.max_usd;
+        let ledger = Ledger::open(
+            workspace.cost_ledger(),
+            max.is_finite().then_some(max),
+            start <= 1,
+        )?;
+
         Ok(Self {
             ctx: PipelineContext {
                 config,
@@ -40,6 +49,7 @@ impl Orchestrator {
                 audit_dir,
                 bulwark_root,
                 bulwark_install,
+                ledger,
             },
             start_pass: start,
             end_pass: end,
@@ -362,6 +372,15 @@ impl Orchestrator {
             "  Workspace: {}",
             self.ctx.workspace.root().display()
         );
+        let spent = self.ctx.ledger.spent();
+        match self.ctx.ledger.remaining() {
+            Some(left) => eprintln!(
+                "  Claude spend: ${spent:.2} of ${:.2} (${left:.2} left), see {}",
+                spent + left,
+                self.ctx.workspace.cost_ledger().display()
+            ),
+            None => eprintln!("  Claude spend: ${spent:.2}, no budget set"),
+        }
         eprintln!();
     }
 }

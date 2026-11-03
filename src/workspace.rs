@@ -57,6 +57,10 @@ impl Workspace {
         self.root.join("pipeline-status.json")
     }
 
+    pub fn cost_ledger(&self) -> PathBuf {
+        self.root.join("cost.json")
+    }
+
     pub fn recon_summary(&self) -> PathBuf {
         self.recon_dir().join("recon-summary.json")
     }

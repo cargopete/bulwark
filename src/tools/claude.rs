@@ -1,6 +1,8 @@
+use crate::budget::{self, Ledger};
 use crate::error::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 
@@ -20,17 +22,72 @@ pub struct ClaudeSession {
     /// wrapped with the system `timeout` utility and killed after this many
     /// minutes. Exit code 124 means timeout was hit.
     pub timeout_minutes: Option<u32>,
+    /// Ledger name for this session, e.g. `poc:F-003`.
+    pub label: String,
+    /// Dollar cap passed as `--max-budget-usd`; `None` is unlimited.
+    pub budget_usd: Option<f64>,
+    pub ledger: Option<Arc<Ledger>>,
 }
 
 /// Result of a completed Claude session.
 pub struct ClaudeOutput {
     pub exit_code: i32,
     pub log_file: PathBuf,
+    pub cost_usd: Option<f64>,
+}
+
+/// The `type: "result"` record of `--output-format json`, which may be the whole
+/// output or the last element of a message array.
+#[derive(Debug, Default, PartialEq)]
+pub struct SessionResult {
+    pub text: String,
+    pub cost_usd: Option<f64>,
+    pub turns: Option<u64>,
+    pub outcome: String,
+}
+
+pub fn parse_session_json(stdout: &str) -> Option<SessionResult> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    let result = match &v {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .rev()
+            .find(|i| i.get("type").and_then(|t| t.as_str()) == Some("result"))?,
+        obj => obj,
+    };
+    Some(SessionResult {
+        // Error results carry `errors` and no `result`.
+        text: match result.get("result").and_then(|r| r.as_str()) {
+            Some(r) => r.to_string(),
+            None => result
+                .get("errors")
+                .and_then(|e| e.as_array())
+                .map(|e| {
+                    e.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default(),
+        },
+        cost_usd: result.get("total_cost_usd").and_then(|c| c.as_f64()),
+        turns: result.get("num_turns").and_then(|n| n.as_u64()),
+        outcome: result
+            .get("subtype")
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+    })
 }
 
 impl ClaudeSession {
     /// Run the Claude session, writing stdout+stderr to the log file.
     pub async fn run(&self) -> Result<ClaudeOutput> {
+        budget::check_cap(self.budget_usd)?;
+        let reservation = match &self.ledger {
+            Some(l) => Some(l.reserve(&self.label, self.model.clone(), self.budget_usd)?),
+            None => None,
+        };
         // If a timeout is configured, wrap with system `timeout` utility so the
         // subprocess is hard-killed after the wall-clock limit.
         let mut cmd = if let Some(mins) = self.timeout_minutes {
@@ -45,7 +102,14 @@ impl ClaudeSession {
             .arg(&self.prompt)
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
-            .arg("--verbose");
+            .arg("--verbose")
+            .arg("--output-format")
+            .arg("json");
+
+        if let Some(cap) = self.budget_usd {
+            let cli_cap = cap * budget::CLI_CAP_FRACTION;
+            cmd.arg("--max-budget-usd").arg(format!("{cli_cap:.2}"));
+        }
 
         if let Some(model) = &self.model {
             cmd.arg("--model").arg(model);
@@ -57,23 +121,45 @@ impl ClaudeSession {
             }
         }
 
-        let output = cmd
-            .current_dir(&self.working_dir)
-            .output()
-            .await?;
+        let output = match cmd.current_dir(&self.working_dir).output().await {
+            Ok(o) => o,
+            Err(e) => {
+                // Never started, so nothing was spent.
+                if let (Some(l), Some(i)) = (&self.ledger, reservation) {
+                    l.settle(i, Some(0.0), None, "spawn_failed")?;
+                }
+                return Err(e.into());
+            }
+        };
 
-        // Write combined output to log file
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = parse_session_json(&stdout);
+
+        // The log keeps the session's final text, which the passes parse; raw JSON sits beside it.
         let mut log_content = Vec::new();
-        log_content.extend_from_slice(&output.stdout);
+        match &parsed {
+            Some(r) => log_content.extend_from_slice(r.text.as_bytes()),
+            None => log_content.extend_from_slice(&output.stdout),
+        }
         if !output.stderr.is_empty() {
             log_content.extend_from_slice(b"\n--- STDERR ---\n");
             log_content.extend_from_slice(&output.stderr);
         }
         std::fs::write(&self.log_file, &log_content)?;
+        let mut raw = self.log_file.clone().into_os_string();
+        raw.push(".json");
+        std::fs::write(raw, &output.stdout)?;
+
+        let cost_usd = parsed.as_ref().and_then(|r| r.cost_usd);
+        if let (Some(l), Some(i)) = (&self.ledger, reservation) {
+            let outcome = parsed.as_ref().map_or("no_result", |r| r.outcome.as_str());
+            l.settle(i, cost_usd, parsed.as_ref().and_then(|r| r.turns), outcome)?;
+        }
 
         Ok(ClaudeOutput {
             exit_code: output.status.code().unwrap_or(-1),
             log_file: self.log_file.clone(),
+            cost_usd,
         })
     }
 
@@ -254,6 +340,45 @@ pub(crate) fn looks_like_findings(arr: &[serde_json::Value]) -> bool {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn session_json_object_and_array_forms() {
+        let obj = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","total_cost_usd":0.42,"num_turns":7}"#;
+        let r = parse_session_json(obj).unwrap();
+        assert_eq!(r.text, "done");
+        assert_eq!(r.cost_usd, Some(0.42));
+        assert_eq!(r.turns, Some(7));
+        assert_eq!(r.outcome, "success");
+
+        let arr = format!(r#"[{{"type":"system"}},{{"type":"assistant"}},{obj}]"#);
+        assert_eq!(parse_session_json(&arr).unwrap(), r);
+    }
+
+    #[test]
+    fn budget_error_keeps_cost_and_errors() {
+        let out = r#"{"type":"result","subtype":"error_max_budget_usd","is_error":true,"errors":["budget reached"],"total_cost_usd":3.51}"#;
+        let r = parse_session_json(out).unwrap();
+        assert_eq!(r.outcome, "error_max_budget_usd");
+        assert_eq!(r.cost_usd, Some(3.51));
+        assert_eq!(r.text, "budget reached");
+    }
+
+    #[test]
+    fn real_verbose_budget_stop_from_cli_2_1_317() {
+        let out = r#"[{"type":"system","subtype":"init","session_id":"x"},
+            {"type":"assistant","message":{}},
+            {"type":"result","subtype":"error_max_budget_usd","is_error":true,"result":null,
+             "errors":["Reached maximum budget ($0.001)"],"total_cost_usd":0.0030603550000000003,"num_turns":1}]"#;
+        let r = parse_session_json(out).unwrap();
+        assert_eq!(r.outcome, "error_max_budget_usd");
+        assert_eq!(r.text, "Reached maximum budget ($0.001)");
+        assert!((r.cost_usd.unwrap() - 0.00306).abs() < 1e-5);
+    }
+
+    #[test]
+    fn non_json_is_none() {
+        assert!(parse_session_json("Error: not logged in").is_none());
+    }
 
     #[test]
     fn extract_findings_from_log_with_embedded_json() {

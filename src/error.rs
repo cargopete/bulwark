@@ -27,6 +27,9 @@ pub enum BulwarkError {
     #[error("checkpoint not found for pass '{pass}'")]
     CheckpointNotFound { pass: String },
 
+    #[error("run budget exhausted: ${left:.2} left, below the minimum for a session")]
+    BudgetExhausted { left: f64 },
+
     #[error("config error: {0}")]
     Config(String),
 

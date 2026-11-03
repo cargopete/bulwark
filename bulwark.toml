@@ -32,6 +32,11 @@ math_sensitive = [
 # formal           = "claude-sonnet-5-5"
 # review           = "claude-opus-5-5"
 
+[budget]
+# Hard cap on Claude spend for one run. Each pass gets its share of what is left;
+# PoCs are attempted highest severity first. Spend is recorded in <workspace>/cost.json.
+max_usd = 20.0
+
 [workspace]
 path = "audit-workspace"
 

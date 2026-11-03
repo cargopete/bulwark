@@ -290,6 +290,9 @@ async fn generate_invariant_tests(
             "Glob".into(), "Grep".into(),
         ],
         timeout_minutes: Some(30),
+        label: "fuzzing".into(),
+        budget_usd: ctx.allowance("fuzzing").split(1),
+        ledger: Some(ctx.ledger.clone()),
     };
 
     let _ = session.run_with_spinner("Generating invariant tests...").await;

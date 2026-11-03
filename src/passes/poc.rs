@@ -1,3 +1,4 @@
+use crate::budget;
 use crate::error::{BulwarkError, Result};
 use crate::findings::Finding;
 use crate::passes::poc_evidence::{
@@ -8,6 +9,9 @@ use crate::tools::claude::{self, ClaudeSession};
 use console::style;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+
+/// Part of the pass's money set aside for fp-check; the rest goes to PoCs.
+const FP_CHECK_SHARE: f64 = 0.2;
 
 /// Pass 3: PoC Generation & Validation — "No PoC, no finding" gate.
 ///
@@ -25,10 +29,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         });
     }
 
-    let findings: Vec<Finding> = {
+    let mut findings: Vec<Finding> = {
         let content = std::fs::read_to_string(&merged_path)?;
         serde_json::from_str(&content)?
     };
+    // Highest severity first, so a tight budget is spent where the payouts are.
+    findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    let allowance = ctx.allowance("poc");
 
     if findings.is_empty() {
         eprintln!("  No findings from Pass 2 — nothing to validate.");
@@ -44,7 +51,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "  Running false-positive check on {} findings...",
             findings.len()
         );
-        run_fp_check_filter(ctx, &findings, &claude_bin).await?
+        let fp_cap = allowance
+            .left()
+            .map(|l| l * FP_CHECK_SHARE / findings.len() as f64);
+        run_fp_check_filter(ctx, &findings, &claude_bin, fp_cap).await?
     } else {
         findings
     };
@@ -140,7 +150,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let poc_file = pocs_dir.join(format!("{}.t.sol", finding.id));
         let log_file = logs_dir.join(format!("{}.log", finding.id));
 
-        let outcome = generate_and_validate_poc(ctx, &poc_run, finding, &poc_file, &log_file).await;
+        let finding_cap = allowance.split(findings.len() - idx);
+        let outcome =
+            generate_and_validate_poc(ctx, &poc_run, finding, &poc_file, &log_file, finding_cap)
+                .await;
         let record_file = pocs_dir.join(format!("{}.poc.json", finding.id));
         if !outcome.record.is_null() {
             write_json(&record_file, &outcome.record)?;
@@ -251,6 +264,7 @@ async fn generate_and_validate_poc(
     finding: &Finding,
     poc_file: &Path,
     log_file: &Path,
+    finding_cap: Option<f64>,
 ) -> PocOutcome {
     let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
     let rel_poc = format!("test/pocs/{}.t.sol", finding.id);
@@ -277,7 +291,17 @@ async fn generate_and_validate_poc(
     // A leftover file from an earlier run would otherwise be graded as this run's work.
     let _ = std::fs::remove_file(poc_file);
 
+    let spent_before = ctx.ledger.spent();
     for retry in 0..=run.max_retries {
+        let attempt_cap = finding_cap.map(|c| c - (ctx.ledger.spent() - spent_before));
+        if budget::check_cap(attempt_cap).is_err() {
+            eprintln!("    {} Run budget exhausted", style("⚑").cyan());
+            if retry == 0 {
+                last.status = "not_attempted".into();
+                last.reasons = vec!["run budget exhausted before a PoC was attempted".into()];
+            }
+            break;
+        }
         if retry > 0 {
             eprintln!("    Retry {retry}/{}...", run.max_retries);
         }
@@ -304,6 +328,9 @@ async fn generate_and_validate_poc(
             model: Some(ctx.config.model_for("poc")),
             allowed_tools: vec![],
             timeout_minutes: Some(45),
+            label: format!("poc:{}", finding.id),
+            budget_usd: attempt_cap,
+            ledger: Some(ctx.ledger.clone()),
         };
         let _ = session.run_with_spinner("Generating PoC...").await;
 
@@ -526,6 +553,17 @@ fn apply_validation_gate(
             validated.push(finding_json);
             stats.inconclusive += 1;
         }
+        "not_attempted" => {
+            eprintln!(
+                "    {} NOT ATTEMPTED — run budget exhausted",
+                style("⚑").cyan()
+            );
+            finding_json["poc_status"] = json!("not_attempted");
+            finding_json["unverifiable_reason"] =
+                json!("Run budget ran out before a PoC was attempted. Not disproven.");
+            unverifiable.push(finding_json);
+            stats.unverifiable += 1;
+        }
         "unverifiable_build_failure" => {
             eprintln!(
                 "    {} UNVERIFIABLE — PoC could not compile due to build failure in: {}",
@@ -657,6 +695,7 @@ async fn run_fp_check_filter(
     ctx: &PipelineContext,
     findings: &[Finding],
     claude_bin: &Path,
+    cap_each: Option<f64>,
 ) -> Result<Vec<Finding>> {
     if !claude::is_skill_available("tob-fp-check") {
         eprintln!(
@@ -714,6 +753,9 @@ async fn run_fp_check_filter(
             model: Some(ctx.config.model_for("fp_check")),
             allowed_tools: vec![],
             timeout_minutes: Some(15),
+            label: format!("fp_check:{}", finding.id),
+            budget_usd: cap_each,
+            ledger: Some(ctx.ledger.clone()),
         };
 
         let result = session

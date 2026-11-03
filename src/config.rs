@@ -29,6 +29,28 @@ pub struct Config {
     /// Claude model per stage, keyed by `STAGES` or an agent name.
     #[serde(default)]
     pub models: BTreeMap<String, String>,
+
+    #[serde(default)]
+    pub budget: BudgetConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    /// Hard cap in USD on Claude spend for one run, pass 1 through 6.
+    #[serde(default = "default_max_usd")]
+    pub max_usd: f64,
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_usd: default_max_usd(),
+        }
+    }
+}
+
+fn default_max_usd() -> f64 {
+    20.0
 }
 
 pub const OPUS: &str = "claude-opus-5-5";

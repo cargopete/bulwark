@@ -852,6 +852,9 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         model: Some(ctx.config.model_for("scv_scan")),
         allowed_tools: vec![],
         timeout_minutes: Some(30),
+        label: "scv_scan".into(),
+        budget_usd: ctx.allowance("recon").split(1),
+        ledger: Some(ctx.ledger.clone()),
     };
 
     let _ = session.run().await?;
