@@ -1,6 +1,7 @@
 use crate::error::Result;
 
 use crate::pipeline::pass::PipelineContext;
+use crate::program::ProgramConfig;
 use crate::tools::claude::ClaudeSession;
 use chrono::Utc;
 use console::style;
@@ -215,6 +216,14 @@ async fn run_adversarial_review(
          'Before You Start' section above. They are all present in the working directory.\n\n\
          Write your review to: audit-workspace/review/adversarial-review.json\n"
     );
+    let prompt = match &ctx.config.program {
+        Some(program) => format!(
+            "{prompt}{}\nIn `severity_challenges`, give `\"proposed_impact\": \"I-<n>\"`. The \
+             severity is that row's; a challenge without a valid row is ignored.\n",
+            program.impact_table()
+        ),
+        None => prompt,
+    };
 
     let session = ClaudeSession {
         claude_bin,
@@ -313,15 +322,21 @@ fn apply_review_adjustments(findings: &mut Vec<Value>, review: &Value, ctx: &Pip
             let Some(finding_id) = upgrade.get("finding_id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            let Some(proposed) = upgrade.get("proposed_severity").and_then(|v| v.as_str()) else {
-                continue;
-            };
-
+            let resolved = resolve_challenge(ctx.config.program.as_ref(), upgrade);
             for f in findings.iter_mut() {
-                if f.get("id").and_then(|v| v.as_str()) == Some(finding_id) {
-                    f["original_severity"] = f["severity"].clone();
-                    f["severity"] = json!(proposed);
-                    f["severity_upgraded_by"] = json!("adversarial_review");
+                if f.get("id").and_then(|v| v.as_str()) != Some(finding_id) {
+                    continue;
+                }
+                match &resolved {
+                    Ok((severity, impact)) => {
+                        f["original_severity"] = f["severity"].clone();
+                        f["severity"] = json!(severity);
+                        f["severity_upgraded_by"] = json!("adversarial_review");
+                        if let Some(i) = impact {
+                            f["impact"] = json!(i);
+                        }
+                    }
+                    Err(why) => f["review_challenge_ignored"] = json!(why),
                 }
             }
         }
@@ -715,6 +730,29 @@ fn read_json_object_opt(path: &Path) -> Option<Value> {
         .and_then(|c| serde_json::from_str(&c).ok())
 }
 
+/// The severity a challenge may set. With a program, only an impact-table row can set it.
+fn resolve_challenge(
+    program: Option<&ProgramConfig>,
+    challenge: &Value,
+) -> std::result::Result<(String, Option<String>), String> {
+    let Some(program) = program else {
+        return challenge
+            .get("proposed_severity")
+            .and_then(|v| v.as_str())
+            .map(|s| (s.to_string(), None))
+            .ok_or_else(|| "no proposed_severity".to_string());
+    };
+    let cited = challenge
+        .get("proposed_impact")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    match program.impact(cited) {
+        Some(row) => Ok((row.severity.to_string(), Some(cited.to_string()))),
+        None if cited.is_empty() => Err("challenge named no impact row".into()),
+        None => Err(format!("{cited} is not in the impact table")),
+    }
+}
+
 fn count_severity(findings: &[Value], severity: &str) -> usize {
     findings
         .iter()
@@ -737,4 +775,45 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program() -> ProgramConfig {
+        toml::from_str(
+            "[[impacts]]\nseverity = \"Critical\"\ntext = \"theft\"\n\
+             [[impacts]]\nseverity = \"Medium\"\ntext = \"griefing\"\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn program_challenge_takes_the_rows_severity() {
+        let c = json!({"finding_id": "F-1", "proposed_severity": "Low", "proposed_impact": "I-1"});
+        assert_eq!(
+            resolve_challenge(Some(&program()), &c),
+            Ok(("Critical".into(), Some("I-1".into())))
+        );
+    }
+
+    #[test]
+    fn program_challenge_without_a_valid_row_is_ignored() {
+        let p = program();
+        let bare = json!({"finding_id": "F-1", "proposed_severity": "Critical"});
+        assert!(resolve_challenge(Some(&p), &bare).is_err());
+        let bad = json!({"finding_id": "F-1", "proposed_impact": "I-7"});
+        assert!(
+            resolve_challenge(Some(&p), &bad)
+                .unwrap_err()
+                .contains("I-7")
+        );
+    }
+
+    #[test]
+    fn without_a_program_the_proposed_severity_stands() {
+        let c = json!({"finding_id": "F-1", "proposed_severity": "High"});
+        assert_eq!(resolve_challenge(None, &c), Ok(("High".into(), None)));
+    }
 }
