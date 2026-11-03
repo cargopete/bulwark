@@ -3,20 +3,21 @@ use std::path::Path;
 
 /// Validate each element of a JSON array against a schema.
 pub fn validate_findings_array(findings: &serde_json::Value, schema_path: &Path) -> Result<()> {
-    let arr = findings.as_array().ok_or_else(|| BulwarkError::SchemaValidation {
-        file: schema_path.to_path_buf(),
-        errors: vec!["expected JSON array".into()],
-    })?;
+    let arr = findings
+        .as_array()
+        .ok_or_else(|| BulwarkError::SchemaValidation {
+            file: schema_path.to_path_buf(),
+            errors: vec!["expected JSON array".into()],
+        })?;
 
     let schema_content = std::fs::read_to_string(schema_path)?;
     let schema: serde_json::Value = serde_json::from_str(&schema_content)?;
 
-    let validator = jsonschema::validator_for(&schema).map_err(|e| {
-        BulwarkError::SchemaValidation {
+    let validator =
+        jsonschema::validator_for(&schema).map_err(|e| BulwarkError::SchemaValidation {
             file: schema_path.to_path_buf(),
             errors: vec![format!("failed to compile schema: {e}")],
-        }
-    })?;
+        })?;
 
     let mut all_errors = Vec::new();
     for (i, item) in arr.iter().enumerate() {

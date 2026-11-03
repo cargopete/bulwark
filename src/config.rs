@@ -574,10 +574,7 @@ core_contracts = ["Test"]
     fn default_agents_list_is_red_blue_gold() {
         let config: Config = toml::from_str(MINIMAL_TOML).expect("parse");
 
-        assert_eq!(
-            config.passes.agents.agents,
-            vec!["red", "blue", "gold"]
-        );
+        assert_eq!(config.passes.agents.agents, vec!["red", "blue", "gold"]);
     }
 
     #[test]
@@ -601,13 +598,28 @@ core_contracts = ["Test"]
 
         assert_eq!(roundtripped.target.repo, config.target.repo);
         assert_eq!(roundtripped.target.scope, config.target.scope);
-        assert_eq!(roundtripped.target.core_contracts, config.target.core_contracts);
+        assert_eq!(
+            roundtripped.target.core_contracts,
+            config.target.core_contracts
+        );
         assert_eq!(roundtripped.target.branch, config.target.branch);
         assert_eq!(roundtripped.workspace.path, config.workspace.path);
-        assert_eq!(roundtripped.passes.agents.agents, config.passes.agents.agents);
-        assert_eq!(roundtripped.passes.agents.max_turns, config.passes.agents.max_turns);
-        assert_eq!(roundtripped.passes.fuzzing.fuzz_runs, config.passes.fuzzing.fuzz_runs);
-        assert_eq!(roundtripped.passes.formal.solver_timeout, config.passes.formal.solver_timeout);
+        assert_eq!(
+            roundtripped.passes.agents.agents,
+            config.passes.agents.agents
+        );
+        assert_eq!(
+            roundtripped.passes.agents.max_turns,
+            config.passes.agents.max_turns
+        );
+        assert_eq!(
+            roundtripped.passes.fuzzing.fuzz_runs,
+            config.passes.fuzzing.fuzz_runs
+        );
+        assert_eq!(
+            roundtripped.passes.formal.solver_timeout,
+            config.passes.formal.solver_timeout
+        );
     }
 
     #[test]

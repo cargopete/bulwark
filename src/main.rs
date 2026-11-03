@@ -43,7 +43,11 @@ async fn main() -> anyhow::Result<()> {
         cli.config.clone()
     } else if let Ok(root) = std::env::var("BULWARK_ROOT") {
         let root_config = PathBuf::from(&root).join("bulwark.toml");
-        if root_config.exists() { root_config } else { cli.config.clone() }
+        if root_config.exists() {
+            root_config
+        } else {
+            cli.config.clone()
+        }
     } else {
         cli.config.clone()
     };
@@ -134,9 +138,7 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
 
     if status.passes.is_empty() {
         eprintln!("No pipeline runs recorded yet.");
-        eprintln!(
-            "Run: bulwark run --pass 1    (to start with reconnaissance)"
-        );
+        eprintln!("Run: bulwark run --pass 1    (to start with reconnaissance)");
         return Ok(());
     }
 
@@ -147,13 +149,9 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
     for (i, name) in pass_order.iter().enumerate() {
         if let Some(record) = status.passes.get(*name) {
             let status_str = match record.status {
-                pipeline::pass::PassStatus::Completed => {
-                    style("completed").green().to_string()
-                }
+                pipeline::pass::PassStatus::Completed => style("completed").green().to_string(),
                 pipeline::pass::PassStatus::Failed => style("FAILED").red().to_string(),
-                pipeline::pass::PassStatus::Skipped => {
-                    style("skipped").yellow().to_string()
-                }
+                pipeline::pass::PassStatus::Skipped => style("skipped").yellow().to_string(),
                 pipeline::pass::PassStatus::NotImplemented => {
                     style("not implemented").dim().to_string()
                 }
@@ -166,12 +164,7 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
                 record.duration
             );
         } else {
-            eprintln!(
-                "  Pass {}: {:<10} {}",
-                i + 1,
-                name,
-                style("not run").dim()
-            );
+            eprintln!("  Pass {}: {:<10} {}", i + 1, name, style("not run").dim());
         }
     }
 
@@ -190,11 +183,7 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
     Ok(())
 }
 
-fn cmd_findings(
-    config: Config,
-    audit_dir: PathBuf,
-    args: cli::FindingsArgs,
-) -> anyhow::Result<()> {
+fn cmd_findings(config: Config, audit_dir: PathBuf, args: cli::FindingsArgs) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
     let merged = ws.merged_findings();
 
@@ -321,11 +310,7 @@ fn cmd_validate(
     Ok(())
 }
 
-fn cmd_report(
-    config: Config,
-    audit_dir: PathBuf,
-    args: cli::ReportArgs,
-) -> anyhow::Result<()> {
+fn cmd_report(config: Config, audit_dir: PathBuf, args: cli::ReportArgs) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
     let ws_cost = ws.cost_ledger();
     let bulwark_root = std::env::var("BULWARK_ROOT")
@@ -361,11 +346,7 @@ fn cmd_report(
             }
         }
         _ => {
-            eprintln!(
-                "  {} {}",
-                style("✓").green(),
-                result
-            );
+            eprintln!("  {} {}", style("✓").green(), result);
         }
     }
 
@@ -386,9 +367,17 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
             .unwrap_or(false);
         eprintln!(
             "  {} {:<12} {}",
-            if docker_ok { style("✓").green() } else { style("✗").red() },
+            if docker_ok {
+                style("✓").green()
+            } else {
+                style("✗").red()
+            },
             "Docker",
-            if docker_ok { "running" } else { "not available — install Docker Desktop" }
+            if docker_ok {
+                "running"
+            } else {
+                "not available — install Docker Desktop"
+            }
         );
         eprintln!();
         eprintln!(
@@ -404,17 +393,8 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
 
     for tool in &tools {
         match config.resolve_tool(tool) {
-            Ok(path) => eprintln!(
-                "  {} {:<10} {}",
-                style("✓").green(),
-                tool,
-                path.display()
-            ),
-            Err(_) => eprintln!(
-                "  {} {:<10} not found",
-                style("✗").red(),
-                tool,
-            ),
+            Ok(path) => eprintln!("  {} {:<10} {}", style("✓").green(), tool, path.display()),
+            Err(_) => eprintln!("  {} {:<10} not found", style("✗").red(), tool,),
         }
     }
 
@@ -433,10 +413,7 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
     );
 
     if !auth.is_authenticated() {
-        eprintln!(
-            "\n  To authenticate: {}",
-            style("bulwark login").bold()
-        );
+        eprintln!("\n  To authenticate: {}", style("bulwark login").bold());
     }
 
     eprintln!();
@@ -445,7 +422,10 @@ fn cmd_doctor(config: Config) -> anyhow::Result<()> {
 
 fn cmd_init(args: cli::InitArgs) -> anyhow::Result<()> {
     let path = args.path.canonicalize().unwrap_or(args.path.clone());
-    let repo = args.repo.as_deref().unwrap_or("https://github.com/YOUR-ORG/YOUR-REPO.git");
+    let repo = args
+        .repo
+        .as_deref()
+        .unwrap_or("https://github.com/YOUR-ORG/YOUR-REPO.git");
 
     // Derive a project name from repo URL
     let project_name = repo
@@ -579,7 +559,10 @@ that are relevant to economic attack analysis.
 See KNOWN_ISSUES.md.
 "#
     );
-    std::fs::write(project_dir.join("context").join("AUDIT_CONTEXT.md"), audit_context)?;
+    std::fs::write(
+        project_dir.join("context").join("AUDIT_CONTEXT.md"),
+        audit_context,
+    )?;
 
     // context/PROPERTIES.md
     let properties = format!(
@@ -611,7 +594,10 @@ Properties should be:
 <!-- Add more properties as P-3, P-4, etc. -->
 "#
     );
-    std::fs::write(project_dir.join("context").join("PROPERTIES.md"), properties)?;
+    std::fs::write(
+        project_dir.join("context").join("PROPERTIES.md"),
+        properties,
+    )?;
 
     // context/KNOWN_ISSUES.md
     let known_issues = format!(
@@ -631,7 +617,10 @@ or design decisions accepted by the protocol team.
 <!-- Add more known issues as KI-2, KI-3, etc. -->
 "#
     );
-    std::fs::write(project_dir.join("context").join("KNOWN_ISSUES.md"), known_issues)?;
+    std::fs::write(
+        project_dir.join("context").join("KNOWN_ISSUES.md"),
+        known_issues,
+    )?;
 
     eprintln!("{}", style("✓ Project scaffold created").green().bold());
     eprintln!();
@@ -647,7 +636,10 @@ or design decisions accepted by the protocol team.
     eprintln!("  2. Edit context/PROPERTIES.md      — define the invariants to verify");
     eprintln!("  3. Edit context/KNOWN_ISSUES.md    — list accepted risks");
     eprintln!("  4. Edit bulwark.toml               — set scope and core_contracts");
-    eprintln!("  5. Run:  BULWARK_PROJECT={} docker compose up", project_dir.display());
+    eprintln!(
+        "  5. Run:  BULWARK_PROJECT={} docker compose up",
+        project_dir.display()
+    );
 
     Ok(())
 }
@@ -658,10 +650,7 @@ fn cmd_login() -> anyhow::Result<()> {
         anyhow::anyhow!("Claude Code not found. Are you inside the Docker container?")
     })?;
 
-    eprintln!(
-        "  {} Launching Claude login...\n",
-        style("→").cyan()
-    );
+    eprintln!("  {} Launching Claude login...\n", style("→").cyan());
 
     let status = std::process::Command::new(claude)
         .arg("login")
@@ -671,7 +660,10 @@ fn cmd_login() -> anyhow::Result<()> {
         .status()?;
 
     if status.success() {
-        eprintln!("\n  {} Claude authenticated successfully", style("✓").green());
+        eprintln!(
+            "\n  {} Claude authenticated successfully",
+            style("✓").green()
+        );
     } else {
         eprintln!("\n  {} Login failed", style("✗").red());
     }

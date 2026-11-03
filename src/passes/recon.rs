@@ -4,7 +4,7 @@ use crate::tools::claude::{self, ClaudeSession};
 use crate::tools::{forge, slither};
 use chrono::Utc;
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 /// Pass 1: Reconnaissance — entirely deterministic, no AI.
@@ -63,7 +63,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
         let result = forge::build(&forge_bin, &pkg_path).await?;
         let result = if !result.success {
-            let patched = crate::passes::fuzzing::patch_missing_remappings(&pkg_path, &result.stderr);
+            let patched =
+                crate::passes::fuzzing::patch_missing_remappings(&pkg_path, &result.stderr);
             if patched > 0 {
                 forge::build(&forge_bin, &pkg_path).await?
             } else {
@@ -91,7 +92,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let pragma_versions = collect_pragma_versions(ctx)?;
     let pragma_count = pragma_versions.as_array().map_or(0, |a| a.len());
     write_json(&recon_dir.join("pragma-versions.json"), &pragma_versions)?;
-    eprintln!("    {} Found {pragma_count} pragma declarations", style("✓").green());
+    eprintln!(
+        "    {} Found {pragma_count} pragma declarations",
+        style("✓").green()
+    );
 
     // ── 1.3 Static analysis (Slither) ─────────────────────────────
     eprintln!("  Running Slither static analysis...");
@@ -117,7 +121,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         .as_object()
         .map(|m| {
             m.values()
-                .filter_map(|v| v.get("functions").and_then(|f| f.as_array()).map(|a| a.len() as u64))
+                .filter_map(|v| {
+                    v.get("functions")
+                        .and_then(|f| f.as_array())
+                        .map(|a| a.len() as u64)
+                })
                 .sum()
         })
         .unwrap_or(0);
@@ -133,7 +141,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let storage = extract_storage_layouts(ctx, &forge_bin).await?;
     let storage_count = storage.as_object().map_or(0, |m| m.len());
     write_json(&recon_dir.join("storage-layouts.json"), &storage)?;
-    eprintln!("    {} {storage_count} contracts inspected", style("✓").green());
+    eprintln!(
+        "    {} {storage_count} contracts inspected",
+        style("✓").green()
+    );
 
     // ── 1.6 Dependency graph ──────────────────────────────────────
     eprintln!("  Building dependency graph...");
@@ -172,7 +183,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         .as_object()
         .map(|m| {
             m.values()
-                .filter_map(|v| v.get("operations").and_then(|o| o.as_array()).map(|a| a.len()))
+                .filter_map(|v| {
+                    v.get("operations")
+                        .and_then(|o| o.as_array())
+                        .map(|a| a.len())
+                })
                 .sum()
         })
         .unwrap_or(0);
@@ -199,7 +214,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let missing_contracts: Vec<String> = scope_val
         .get("missing")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     if !missing_contracts.is_empty() {
         eprintln!(
@@ -209,14 +228,20 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             missing_contracts.join(", ")
         );
     } else {
-        eprintln!("    {} All core contracts found in source", style("✓").green());
+        eprintln!(
+            "    {} All core contracts found in source",
+            style("✓").green()
+        );
     }
 
     // ── 1.11 Balance-delta pattern detection ──────────────────────
     eprintln!("  Scanning for balance-delta patterns...");
     let balance_delta = detect_balance_delta_patterns(ctx)?;
     let bd_count = balance_delta.as_array().map_or(0, |a| a.len());
-    write_json(&recon_dir.join("balance-delta-patterns.json"), &balance_delta)?;
+    write_json(
+        &recon_dir.join("balance-delta-patterns.json"),
+        &balance_delta,
+    )?;
     if bd_count > 0 {
         eprintln!(
             "    {} {bd_count} contract(s) use balanceOf(address(this)) differentials — flag for cross-contract routing review",
@@ -237,7 +262,10 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             style("⚠").yellow()
         );
     } else {
-        eprintln!("    {} No mutable fund-routing variables found", style("✓").green());
+        eprintln!(
+            "    {} No mutable fund-routing variables found",
+            style("✓").green()
+        );
     }
 
     // ── 1.13 Assemble recon summary ───────────────────────────────
@@ -391,12 +419,12 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
         let result = slither::analyze(&slither_bin, &contracts_dir, &output_path).await?;
         if let Some(json) = result.json {
             combined["packages"][&pkg_name] = json;
-            eprintln!("    {} Slither completed for {pkg_name}", style("✓").green());
-        } else {
             eprintln!(
-                "    {} Slither failed for {pkg_name}",
-                style("⚠").yellow()
+                "    {} Slither completed for {pkg_name}",
+                style("✓").green()
             );
+        } else {
+            eprintln!("    {} Slither failed for {pkg_name}", style("⚠").yellow());
             // Write stderr for debugging
             let stderr_path = recon_dir.join(format!("slither-{pkg_name}-stderr.txt"));
             std::fs::write(&stderr_path, &result.stderr)?;
@@ -674,12 +702,15 @@ fn enumerate_access_control(ctx: &PipelineContext) -> Result<Value> {
 
                 // Find role-like constants
                 if (trimmed.contains("bytes32") || trimmed.contains("uint256"))
-                    && (trimmed.contains("ROLE") || trimmed.contains("role") || trimmed.contains("Role"))
+                    && (trimmed.contains("ROLE")
+                        || trimmed.contains("role")
+                        || trimmed.contains("Role"))
                 {
                     // Extract the role name
                     for word in trimmed.split_whitespace() {
                         if word.contains("ROLE") || word.contains("role") || word.contains("Role") {
-                            let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                            let clean =
+                                word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
                             if !clean.is_empty() {
                                 let entry = access["roles"]
                                     .as_object_mut()
@@ -991,15 +1022,25 @@ fn detect_routing_variables(ctx: &PipelineContext) -> Result<Value> {
     let mut findings = Vec::new();
 
     let routing_keywords = [
-        "destination", "Destination",
-        "beneficiary", "Beneficiary",
-        "recipient", "Recipient",
-        "feeReceiver", "FeeReceiver",
-        "feeAddress", "FeeAddress",
-        "rewardAddress", "RewardAddress",
-        "withdrawAddress", "WithdrawAddress",
-        "paymentAddress", "PaymentAddress",
-        "paymentsDestination", "feeDest", "payDest",
+        "destination",
+        "Destination",
+        "beneficiary",
+        "Beneficiary",
+        "recipient",
+        "Recipient",
+        "feeReceiver",
+        "FeeReceiver",
+        "feeAddress",
+        "FeeAddress",
+        "rewardAddress",
+        "RewardAddress",
+        "withdrawAddress",
+        "WithdrawAddress",
+        "paymentAddress",
+        "PaymentAddress",
+        "paymentsDestination",
+        "feeDest",
+        "payDest",
     ];
 
     for pkg in &ctx.config.target.scope {
@@ -1025,8 +1066,8 @@ fn detect_routing_variables(ctx: &PipelineContext) -> Result<Value> {
                 }
 
                 // Only inspect state variable declarations
-                let is_state_decl = trimmed.starts_with("address ")
-                    || trimmed.starts_with("mapping(");
+                let is_state_decl =
+                    trimmed.starts_with("address ") || trimmed.starts_with("mapping(");
                 if !is_state_decl {
                     continue;
                 }

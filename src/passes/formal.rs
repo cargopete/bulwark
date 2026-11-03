@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
 use console::style;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 /// Pass 5: Formal Verification via Halmos bounded model checking.
@@ -36,10 +36,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             style("✓").green()
         );
     } else {
-        eprintln!(
-            "  {} No symbolic tests generated",
-            style("⚠").yellow()
-        );
+        eprintln!("  {} No symbolic tests generated", style("⚠").yellow());
     }
 
     // ── Step 1b: Enforce suffixed function naming ────────────────────
@@ -57,7 +54,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     // Remove any stale .sol files from previous AI experiments that might have imports
     // (test_minimal.sol, test_require.sol etc) — they crash Halmos if left behind.
     if formal_dir.exists() {
-        for entry in std::fs::read_dir(&formal_dir).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(&formal_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let p = entry.path();
             if p.extension().is_some_and(|e| e == "sol") {
                 // Only keep the canonical Symbolic*.t.sol files the generator should produce
@@ -83,9 +84,17 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let forge_bin = ctx.config.resolve_tool("forge")?;
         let build_output = crate::tools::run_command(
             forge_bin.to_str().unwrap_or("forge"),
-            &["build", "--force", "--ast", "--extra-output", "storageLayout", "metadata"],
+            &[
+                "build",
+                "--force",
+                "--ast",
+                "--extra-output",
+                "storageLayout",
+                "metadata",
+            ],
             &formal_dir,
-        ).await?;
+        )
+        .await?;
         let build_ok = build_output.status.success()
             || String::from_utf8_lossy(&build_output.stderr).contains("Compiler run successful");
         if build_ok {
@@ -115,9 +124,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
 
     if halmos_available && tests_exist {
         let halmos_bin = ctx.config.resolve_tool("halmos")?;
-        eprintln!(
-            "  Running Halmos (solver-timeout={solver_timeout}s, loop={loop_bound})...\n"
-        );
+        eprintln!("  Running Halmos (solver-timeout={solver_timeout}s, loop={loop_bound})...\n");
 
         let solver_str = solver_timeout.to_string();
         let loop_str = loop_bound.to_string();
@@ -136,10 +143,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let has_test = find_function_in_dir(&formal_dir, &check_func);
             if !has_test {
                 eprintln!("    {prop}: no symbolic test found — skipping");
-                verification.insert(
-                    prop.clone(),
-                    json!({"status": "no_test", "duration": 0}),
-                );
+                verification.insert(prop.clone(), json!({"status": "no_test", "duration": 0}));
                 continue;
             }
 
@@ -179,7 +183,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             // "Counterexample: unknown" means the solver timed out without finding a real
             // counterexample — it is NOT a violation. Only flag VIOLATED when Halmos
             // produces a concrete counterexample with actual values.
-            let has_real_counterexample = (combined.contains("Counterexample") || combined.contains("counterexample"))
+            let has_real_counterexample = (combined.contains("Counterexample")
+                || combined.contains("counterexample"))
                 && !combined_lower.contains("counterexample: unknown");
             let status = if has_real_counterexample {
                 eprintln!(
@@ -296,34 +301,59 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             } else {
                 "no_tests"
             };
-            verification.insert(
-                prop.clone(),
-                json!({"status": "not_run", "reason": reason}),
-            );
+            verification.insert(prop.clone(), json!({"status": "not_run", "reason": reason}));
         }
     }
 
     // ── Write outputs ───────────────────────────────────────────────
     let verified: Vec<&String> = properties
         .iter()
-        .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("VERIFIED"))
+        .filter(|p| {
+            verification
+                .get(*p)
+                .and_then(|v| v.get("status"))
+                .and_then(|s| s.as_str())
+                == Some("VERIFIED")
+        })
         .collect();
     let violated: Vec<&String> = properties
         .iter()
-        .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("VIOLATED"))
+        .filter(|p| {
+            verification
+                .get(*p)
+                .and_then(|v| v.get("status"))
+                .and_then(|s| s.as_str())
+                == Some("VIOLATED")
+        })
         .collect();
     let timeouts: Vec<&String> = properties
         .iter()
-        .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("TIMEOUT"))
+        .filter(|p| {
+            verification
+                .get(*p)
+                .and_then(|v| v.get("status"))
+                .and_then(|s| s.as_str())
+                == Some("TIMEOUT")
+        })
         .collect();
     let build_errors: Vec<&String> = properties
         .iter()
-        .filter(|p| verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()) == Some("build_error"))
+        .filter(|p| {
+            verification
+                .get(*p)
+                .and_then(|v| v.get("status"))
+                .and_then(|s| s.as_str())
+                == Some("build_error")
+        })
         .collect();
     let not_run: Vec<&String> = properties
         .iter()
         .filter(|p| {
-            let s = verification.get(*p).and_then(|v| v.get("status")).and_then(|s| s.as_str()).unwrap_or("");
+            let s = verification
+                .get(*p)
+                .and_then(|v| v.get("status"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
             s == "not_run" || s == "no_test" || s == "build_error"
         })
         .collect();
@@ -412,8 +442,12 @@ async fn generate_symbolic_tests(
         log_file: logs_dir.join("halmos-generation.log"),
         model: Some(ctx.config.model_for("formal")),
         allowed_tools: vec![
-            "Read".into(), "Write".into(), "Edit".into(),
-            "Glob".into(), "Grep".into(), "Bash".into(),
+            "Read".into(),
+            "Write".into(),
+            "Edit".into(),
+            "Glob".into(),
+            "Grep".into(),
+            "Bash".into(),
         ],
         timeout_minutes: Some(60),
         label: "formal".into(),
@@ -421,7 +455,9 @@ async fn generate_symbolic_tests(
         ledger: Some(ctx.ledger.clone()),
     };
 
-    let _ = session.run_with_spinner("Generating symbolic tests...").await;
+    let _ = session
+        .run_with_spinner("Generating symbolic tests...")
+        .await;
     count_sol_files(formal_dir)
 }
 
@@ -489,7 +525,9 @@ fn patch_bare_check_names(dir: &Path) {
         if !path.extension().is_some_and(|e| e == "sol") {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
 
         // Find `function check_P{digits}(` — bare name (no underscore after digits).
         // We do this with a simple string scan rather than pulling in a regex dep.
@@ -502,7 +540,9 @@ fn patch_bare_check_names(dir: &Path) {
             rest = &rest[pos + 16..];
 
             // Consume digits
-            let digit_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let digit_end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
             let digits = &rest[..digit_end];
             rest = &rest[digit_end..];
 
@@ -552,7 +592,9 @@ optimizer_runs = 200
 /// `IndexError: pop from empty list` on any contract compiled with solc 0.8.24+.
 fn patch_foundry_evm_version(build_dir: &Path, version: &str) {
     let toml_path = build_dir.join("foundry.toml");
-    let Ok(content) = std::fs::read_to_string(&toml_path) else { return };
+    let Ok(content) = std::fs::read_to_string(&toml_path) else {
+        return;
+    };
 
     let new_line = format!("evm_version = \"{version}\"");
 

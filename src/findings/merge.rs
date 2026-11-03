@@ -163,17 +163,20 @@ mod tests {
 
     #[test]
     fn two_sources_overlapping_hash_deduplicates_highest_severity_wins() {
-        let red_findings = vec![
-            make_finding("Reentrancy", Severity::Medium, "Token", "hash_dup"),
-        ];
-        let blue_findings = vec![
-            make_finding("Reentrancy", Severity::High, "Token", "hash_dup"),
-        ];
+        let red_findings = vec![make_finding(
+            "Reentrancy",
+            Severity::Medium,
+            "Token",
+            "hash_dup",
+        )];
+        let blue_findings = vec![make_finding(
+            "Reentrancy",
+            Severity::High,
+            "Token",
+            "hash_dup",
+        )];
 
-        let result = merge_and_dedup(vec![
-            ("red", red_findings),
-            ("blue", blue_findings),
-        ]);
+        let result = merge_and_dedup(vec![("red", red_findings), ("blue", blue_findings)]);
 
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.total_input, 2);
@@ -185,17 +188,10 @@ mod tests {
 
     #[test]
     fn severity_disagreements_tracked_when_agents_disagree() {
-        let red_findings = vec![
-            make_finding("Bug X", Severity::Low, "Token", "hash_x"),
-        ];
-        let blue_findings = vec![
-            make_finding("Bug X", Severity::Critical, "Token", "hash_x"),
-        ];
+        let red_findings = vec![make_finding("Bug X", Severity::Low, "Token", "hash_x")];
+        let blue_findings = vec![make_finding("Bug X", Severity::Critical, "Token", "hash_x")];
 
-        let result = merge_and_dedup(vec![
-            ("red", red_findings),
-            ("blue", blue_findings),
-        ]);
+        let result = merge_and_dedup(vec![("red", red_findings), ("blue", blue_findings)]);
 
         assert_eq!(result.severity_disagreements, 1);
         let finding = &result.findings[0];
@@ -212,10 +208,7 @@ mod tests {
         let mut blue_f = make_finding("Bug", Severity::High, "Token", "hash_fb");
         blue_f.source = "blue".into();
 
-        let result = merge_and_dedup(vec![
-            ("red", vec![red_f]),
-            ("blue", vec![blue_f]),
-        ]);
+        let result = merge_and_dedup(vec![("red", vec![red_f]), ("blue", vec![blue_f])]);
 
         let finding = &result.findings[0];
         assert!(finding.found_by.contains(&"blue".to_string()));
@@ -249,10 +242,7 @@ mod tests {
         let f1 = make_finding("Same Bug", Severity::Low, "Token", "");
         let f2 = make_finding("Same Bug", Severity::High, "Token", "");
 
-        let result = merge_and_dedup(vec![
-            ("red", vec![f1]),
-            ("blue", vec![f2]),
-        ]);
+        let result = merge_and_dedup(vec![("red", vec![f1]), ("blue", vec![f2])]);
 
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.duplicates_removed, 1);

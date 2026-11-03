@@ -113,8 +113,12 @@ pub struct PassRange {
 
 pub(crate) fn parse_pass_range(s: &str) -> Result<PassRange, String> {
     if let Some((start, end)) = s.split_once('-') {
-        let start: u8 = start.parse().map_err(|_| format!("invalid pass number: {start}"))?;
-        let end: u8 = end.parse().map_err(|_| format!("invalid pass number: {end}"))?;
+        let start: u8 = start
+            .parse()
+            .map_err(|_| format!("invalid pass number: {start}"))?;
+        let end: u8 = end
+            .parse()
+            .map_err(|_| format!("invalid pass number: {end}"))?;
         if !(1..=6).contains(&start) || !(1..=6).contains(&end) || start > end {
             return Err(format!("pass range must be 1-6, got {start}-{end}"));
         }

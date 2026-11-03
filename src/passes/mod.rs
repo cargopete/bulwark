@@ -26,7 +26,10 @@ pub fn scan_test_infrastructure(ctx: &PipelineContext) -> String {
             if let Ok(entries) = glob_sol_files(&test_dir) {
                 for file in entries {
                     if let Ok(content) = std::fs::read_to_string(&file) {
-                        if content.contains("contract") && content.contains("Test") && content.contains(" is ") {
+                        if content.contains("contract")
+                            && content.contains("Test")
+                            && content.contains(" is ")
+                        {
                             let rel = file
                                 .strip_prefix(&ctx.audit_dir)
                                 .unwrap_or(&file)
@@ -62,9 +65,17 @@ pub fn scan_test_infrastructure(ctx: &PipelineContext) -> String {
             let relevant: String = content
                 .lines()
                 .filter(|l| {
-                    ["src", "test", "out", "libs", "remappings", "solc", "evm_version"]
-                        .iter()
-                        .any(|k| l.contains(k))
+                    [
+                        "src",
+                        "test",
+                        "out",
+                        "libs",
+                        "remappings",
+                        "solc",
+                        "evm_version",
+                    ]
+                    .iter()
+                    .any(|k| l.contains(k))
                 })
                 .collect::<Vec<_>>()
                 .join("\n");

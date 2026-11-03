@@ -333,7 +333,9 @@ pub(crate) fn looks_like_findings(arr: &[serde_json::Value]) -> bool {
         return false;
     }
     // Check if first element has "severity" field
-    arr[0].as_object().is_some_and(|obj| obj.contains_key("severity"))
+    arr[0]
+        .as_object()
+        .is_some_and(|obj| obj.contains_key("severity"))
 }
 
 #[cfg(test)]
@@ -466,10 +468,8 @@ some text
 
     #[test]
     fn looks_like_findings_true_for_objects_with_severity() {
-        let arr: Vec<serde_json::Value> = serde_json::from_str(
-            r#"[{"severity": "High", "title": "Bug"}]"#,
-        )
-        .unwrap();
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(r#"[{"severity": "High", "title": "Bug"}]"#).unwrap();
         assert!(looks_like_findings(&arr));
     }
 
@@ -481,16 +481,16 @@ some text
 
     #[test]
     fn looks_like_findings_false_for_objects_without_severity() {
-        let arr: Vec<serde_json::Value> = serde_json::from_str(
-            r#"[{"name": "something", "value": 42}]"#,
-        )
-        .unwrap();
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(r#"[{"name": "something", "value": 42}]"#).unwrap();
         assert!(!looks_like_findings(&arr));
     }
 
     #[test]
     fn is_skill_available_returns_false_for_nonexistent_skill() {
-        assert!(!is_skill_available("nonexistent-skill-that-should-never-exist-12345"));
+        assert!(!is_skill_available(
+            "nonexistent-skill-that-should-never-exist-12345"
+        ));
     }
 
     #[test]
@@ -516,7 +516,10 @@ some text
     fn auth_status_display() {
         assert_eq!(AuthStatus::ApiKey.to_string(), "API key");
         assert_eq!(AuthStatus::Login.to_string(), "Claude login");
-        assert_eq!(AuthStatus::NotAuthenticated.to_string(), "not authenticated");
+        assert_eq!(
+            AuthStatus::NotAuthenticated.to_string(),
+            "not authenticated"
+        );
     }
 
     #[test]
