@@ -8,6 +8,7 @@ mod config;
 mod docker;
 mod error;
 mod findings;
+mod known;
 mod passes;
 mod pipeline;
 mod program;

@@ -66,6 +66,8 @@ pub const STAGES: &[&str] = &[
     "scv_scan",
     "variant_analysis",
     "scope_check",
+    "known_extract",
+    "known_match",
     "fp_check",
     "poc",
     "fuzzing",
@@ -76,7 +78,7 @@ pub const STAGES: &[&str] = &[
 /// Opus where a wrong answer loses a real bug: discovery, the discard gate, PoCs, review.
 fn default_stage_model(stage: &str) -> &'static str {
     match stage {
-        "red" | "gold" | "fp_check" | "poc" | "review" => OPUS,
+        "red" | "gold" | "fp_check" | "known_match" | "poc" | "review" => OPUS,
         "scope_check" => HAIKU,
         _ => SONNET,
     }
