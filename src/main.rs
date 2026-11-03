@@ -10,6 +10,7 @@ mod error;
 mod findings;
 mod passes;
 mod pipeline;
+mod program;
 mod tools;
 mod workspace;
 

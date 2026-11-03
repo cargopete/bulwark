@@ -46,10 +46,15 @@ pub struct Finding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub enum Severity {
+    #[serde(alias = "informational")]
     Informational,
+    #[serde(alias = "low")]
     Low,
+    #[serde(alias = "medium")]
     Medium,
+    #[serde(alias = "high")]
     High,
+    #[serde(alias = "critical")]
     Critical,
 }
 

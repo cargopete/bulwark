@@ -5,6 +5,7 @@ pub mod poc;
 pub mod poc_evidence;
 pub mod recon;
 pub mod review;
+pub mod scope;
 pub mod stub;
 
 use crate::pipeline::pass::PipelineContext;

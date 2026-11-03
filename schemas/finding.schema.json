@@ -65,6 +65,15 @@
       ],
       "default": "not_attempted"
     },
+    "impact": {
+      "type": "string",
+      "pattern": "^I-[0-9]+$",
+      "description": "Row of the program's impact table this finding achieves (I-1 is the first)"
+    },
+    "asset": {
+      "type": "string",
+      "description": "In-scope contract the finding is on, as named in [[program.assets]]"
+    },
     "dedup_hash": {
       "type": "string",
       "description": "SHA-256 of (contract + function + property_violated + attack_type) for deduplication"
