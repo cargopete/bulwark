@@ -11,6 +11,7 @@ mod findings;
 mod passes;
 mod pipeline;
 mod program;
+mod program_import;
 mod tools;
 mod workspace;
 
@@ -95,6 +96,13 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init(args) => cmd_init(args)?,
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
+        Commands::Program(cli::ProgramCmd::Import { url }) => {
+            let dir = config_path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            program_import::run(&url, dir).await?
+        }
     }
 
     Ok(())

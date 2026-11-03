@@ -32,12 +32,15 @@ pub struct ProgramConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Asset {
-    /// Contract name as it appears in source, e.g. "Vault".
+    /// Contract name as it appears in source, e.g. "Vault". Empty after an import.
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub address: Option<String>,
     #[serde(default)]
     pub chain_id: Option<u64>,
+    #[serde(default)]
+    pub url: Option<String>,
     #[serde(default = "default_kind")]
     pub kind: String,
 }
@@ -118,9 +121,9 @@ impl ProgramConfig {
     }
 
     /// Whether a finding's contract (a file name or a contract name) is a listed asset.
-    /// With no assets listed every contract counts.
+    /// With no named assets every contract counts.
     pub fn has_asset(&self, contract: &str) -> bool {
-        if self.assets.is_empty() {
+        if self.assets.iter().all(|a| a.name.is_empty()) {
             return true;
         }
         let stem = contract
@@ -150,10 +153,16 @@ impl ProgramConfig {
         for (i, imp) in self.impacts.iter().enumerate() {
             s.push_str(&format!("- I-{} [{}] {}\n", i + 1, imp.severity, imp.text));
         }
-        if !self.assets.is_empty() {
+        let named: Vec<&str> = self
+            .assets
+            .iter()
+            .map(|a| a.name.as_str())
+            .filter(|n| !n.is_empty())
+            .collect();
+        if !named.is_empty() {
             s.push_str("\n### Assets in scope\n\n");
-            for a in &self.assets {
-                s.push_str(&format!("- {}\n", a.name));
+            for n in named {
+                s.push_str(&format!("- {n}\n"));
             }
         }
         s.push_str("\n### Out of scope (not paid, do not report)\n\n");
