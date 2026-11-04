@@ -44,6 +44,8 @@ agents = ["red", "blue", "gold"]
 timeout_minutes = 60
 variant_analysis = true      # Search for pattern variants in high/critical findings
 variant_max_turns = 15
+min_hypotheses = 15          # Component hunters: hypotheses recorded before a session counts as done
+min_forge_tests = 1          # Component hunters: forge test runs before a session counts as done
 
 [passes.poc]
 enabled = true

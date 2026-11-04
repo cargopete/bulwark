@@ -116,6 +116,15 @@ impl Workspace {
         self.findings_dir().join(format!("{agent}-agent-raw.json"))
     }
 
+    pub fn agent_coverage(&self, agent: &str) -> PathBuf {
+        self.findings_dir()
+            .join(format!("{agent}-agent-coverage.json"))
+    }
+
+    pub fn shallow_sessions(&self) -> PathBuf {
+        self.findings_dir().join("shallow-sessions.json")
+    }
+
     pub fn agent_log(&self, agent: &str) -> PathBuf {
         self.findings_logs_dir().join(format!("{agent}-agent.log"))
     }

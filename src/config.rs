@@ -193,6 +193,14 @@ pub struct AgentsPassConfig {
     /// Pass 2 sessions running at once.
     #[serde(default = "default_max_parallel")]
     pub max_parallel: usize,
+
+    /// Hypotheses a component hunter must record before its session counts as done.
+    #[serde(default = "default_min_hypotheses")]
+    pub min_hypotheses: usize,
+
+    /// `forge test` runs a component hunter must make before its session counts as done.
+    #[serde(default = "default_min_forge_tests")]
+    pub min_forge_tests: u64,
 }
 
 /// Unknown keys are an error: in TOML, keys written after the last `[[components]]` belong to it.
@@ -215,6 +223,8 @@ impl Default for AgentsPassConfig {
             variant_max_turns: default_variant_turns(),
             components: Vec::new(),
             max_parallel: default_max_parallel(),
+            min_hypotheses: default_min_hypotheses(),
+            min_forge_tests: default_min_forge_tests(),
         }
     }
 }
@@ -410,6 +420,12 @@ fn default_agents() -> Vec<String> {
 }
 fn default_max_parallel() -> usize {
     4
+}
+fn default_min_hypotheses() -> usize {
+    15
+}
+fn default_min_forge_tests() -> u64 {
+    1
 }
 fn default_agent_timeout() -> u64 {
     240

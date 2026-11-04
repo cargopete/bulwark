@@ -1,18 +1,18 @@
 //! Run state for the dashboard, read fresh from the workspace on every request.
 
 use crate::budget::Entry;
+use crate::coverage::{self, Thresholds};
+pub use crate::coverage::{Coverage, coverage_stats};
 use crate::pipeline::checkpoint::PipelineStatus;
 use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const SILENT_RED_SECS: u64 = 15 * 60;
 pub const SILENT_AMBER_SECS: u64 = 5 * 60;
-/// A component hunter must leave at least this many hypotheses in its coverage file.
-pub const HUNTER_MIN_HYPOTHESES: usize = 15;
 
 const PERSONA_STAGES: [&str; 10] = [
     "red",
@@ -239,6 +239,7 @@ pub struct AgentEvidence {
     pub hunter: bool,
     pub findings_file: bool,
     pub coverage: Option<Coverage>,
+    pub thresholds: Thresholds,
 }
 
 /// The inputs a session's health depends on, kept apart from I/O so the rules can be tested.
@@ -284,12 +285,13 @@ pub fn classify(h: &HealthInput) -> (Health, Vec<String>) {
                     ));
                 }
                 let hyps = c.hypotheses.unwrap_or(0);
-                if a.hunter && hyps < HUNTER_MIN_HYPOTHESES {
-                    red.push(format!("{hyps} hypotheses, under {HUNTER_MIN_HYPOTHESES}"));
+                let min = a.thresholds.min_hypotheses;
+                if a.hunter && hyps < min {
+                    red.push(format!("{hyps} hypotheses, under {min}"));
                 }
             }
         }
-        if a.hunter && h.forge_test_runs == 0 {
+        if a.hunter && h.forge_test_runs < a.thresholds.min_forge_tests {
             amber.push("no forge test".into());
         }
     }
@@ -375,14 +377,6 @@ pub struct AgentView {
     pub coverage: Option<Coverage>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct Coverage {
-    pub files: usize,
-    pub files_read_in_full: usize,
-    /// The array form of the coverage file carries no hypotheses.
-    pub hypotheses: Option<usize>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct FindingsView {
     /// "validated" (Pass 3) or "merged" (Pass 2), whichever is furthest along.
@@ -415,12 +409,10 @@ struct LiveLog {
     activity: Activity,
 }
 
-/// What an agent is answerable for reading in full: a hunter its component's files, any other
-/// agent the program's assets. Empty means every file counts.
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
-    pub assets: HashSet<String>,
-    pub components: HashMap<String, Vec<String>>,
+    pub owed: coverage::Scope,
+    pub thresholds: Thresholds,
     /// Stage to narrating persona, resolved from the config; empty without one.
     pub personas: HashMap<String, Persona>,
 }
@@ -434,20 +426,8 @@ pub struct Persona {
 impl Scope {
     pub fn from_config(c: &crate::config::Config) -> Self {
         Self {
-            assets: c
-                .program
-                .iter()
-                .flat_map(|p| &p.assets)
-                .map(|a| a.name.clone())
-                .filter(|n| !n.is_empty())
-                .collect(),
-            components: c
-                .passes
-                .agents
-                .components
-                .iter()
-                .map(|k| (format!("hunt-{}", k.name), k.files.clone()))
-                .collect(),
+            owed: coverage::Scope::from_config(c),
+            thresholds: Thresholds::from_config(&c.passes.agents),
             personas: PERSONA_STAGES
                 .iter()
                 .map(|s| s.to_string())
@@ -463,22 +443,6 @@ impl Scope {
 
     pub fn persona(&self, label: &str) -> Option<Persona> {
         self.personas.get(stage_for(label)?).cloned()
-    }
-
-    /// Coverage entries are free text that starts with a path.
-    pub fn counts(&self, agent: &str, entry: &str) -> bool {
-        let path = entry.split_whitespace().next().unwrap_or("");
-        if let Some(own) = self.components.get(agent) {
-            return own.iter().any(|f| path.starts_with(f.as_str()));
-        }
-        if self.assets.is_empty() {
-            return true;
-        }
-        let name = Path::new(path)
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        self.assets.contains(name)
     }
 }
 
@@ -637,9 +601,10 @@ fn session_view(
             hunter: a.starts_with("hunt-"),
             findings_file: ws.agent_raw_output(a).exists(),
             // A broken coverage file counts as none; agent_views reports the parse error.
-            coverage: read_json::<Value>(&coverage_path(ws, a), &mut Vec::new())
+            coverage: read_json::<Value>(&ws.agent_coverage(a), &mut Vec::new())
                 .as_ref()
-                .map(|v| coverage_stats(v, |f| scope.counts(a, f))),
+                .map(|v| coverage_stats(v, |f| scope.owed.counts(a, f))),
+            thresholds: scope.thresholds,
         }),
     });
 
@@ -753,49 +718,16 @@ fn agent_views(
         .into_iter()
         .map(|name| {
             let findings: Option<Vec<Value>> = read_json(&ws.agent_raw_output(&name), errors);
-            let coverage: Option<Value> = read_json(&coverage_path(ws, &name), errors);
+            let coverage: Option<Value> = read_json(&ws.agent_coverage(&name), errors);
             AgentView {
                 findings: findings.map(|f| f.len()),
                 coverage: coverage
                     .as_ref()
-                    .map(|v| coverage_stats(v, |f| scope.counts(&name, f))),
+                    .map(|v| coverage_stats(v, |f| scope.owed.counts(&name, f))),
                 name,
             }
         })
         .collect()
-}
-
-fn coverage_path(ws: &Workspace, agent: &str) -> PathBuf {
-    ws.findings_dir()
-        .join(format!("{agent}-agent-coverage.json"))
-}
-
-pub fn coverage_stats(v: &Value, counts: impl Fn(&str) -> bool) -> Coverage {
-    let (files, hypotheses) = match v {
-        Value::Array(a) => (a.as_slice(), None),
-        obj => (
-            obj.get("files")
-                .and_then(Value::as_array)
-                .map_or(&[][..], Vec::as_slice),
-            Some(
-                obj.get("hypotheses")
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len),
-            ),
-        ),
-    };
-    let files: Vec<&Value> = files
-        .iter()
-        .filter(|f| counts(f.get("file").and_then(Value::as_str).unwrap_or("")))
-        .collect();
-    Coverage {
-        files: files.len(),
-        files_read_in_full: files
-            .iter()
-            .filter(|f| f.get("read_in_full").and_then(Value::as_bool) == Some(true))
-            .count(),
-        hypotheses,
-    }
 }
 
 fn findings_view(ws: &Workspace, errors: &mut Vec<String>) -> FindingsView {
@@ -997,6 +929,7 @@ mod tests {
                 hunter: true,
                 findings_file: true,
                 coverage,
+                thresholds: Thresholds::default(),
             }),
         }
     }
@@ -1133,6 +1066,7 @@ mod tests {
                 hunter: false,
                 findings_file: true,
                 coverage: covered(9, 9, None),
+                thresholds: Thresholds::default(),
             }),
             ..hunter(None)
         };
@@ -1235,53 +1169,6 @@ mod tests {
             assert_eq!(label_for(Path::new(path)), label);
             assert_eq!(pass_for(label), pass);
         }
-    }
-
-    #[test]
-    fn scope_holds_hunters_to_their_component_and_others_to_assets() {
-        let scope = Scope {
-            assets: ["Shares".to_string()].into_iter().collect(),
-            components: [("hunt-q".to_string(), vec!["src/q/".to_string()])]
-                .into_iter()
-                .collect(),
-            ..Scope::default()
-        };
-        assert!(scope.counts("hunt-q", "src/q/Queue.sol"));
-        assert!(!scope.counts("hunt-q", "src/fees/FeeHandler.sol (dependency)"));
-        assert!(scope.counts("red", "src/shares/Shares.sol"));
-        assert!(!scope.counts("red", "src/infra/deployment/SharesDeployer.sol"));
-        assert!(Scope::default().counts("red", "anything.sol"));
-
-        let cov = json!([
-            {"file": "src/shares/Shares.sol", "read_in_full": true},
-            {"file": "src/infra/deployment/SharesDeployer.sol", "read_in_full": false}
-        ]);
-        let c = coverage_stats(&cov, |f| scope.counts("red", f));
-        assert_eq!((c.files, c.files_read_in_full), (1, 1));
-    }
-
-    #[test]
-    fn coverage_reads_both_shapes() {
-        let arr =
-            json!([{"file": "a", "read_in_full": true}, {"file": "b", "read_in_full": false}]);
-        assert_eq!(
-            coverage_stats(&arr, |_| true),
-            Coverage {
-                files: 2,
-                files_read_in_full: 1,
-                hypotheses: None
-            }
-        );
-        let obj =
-            json!({"files": [{"file": "a", "read_in_full": true}], "hypotheses": [{}, {}, {}]});
-        assert_eq!(
-            coverage_stats(&obj, |_| true),
-            Coverage {
-                files: 1,
-                files_read_in_full: 1,
-                hypotheses: Some(3)
-            }
-        );
     }
 
     fn write(path: &Path, text: &str) {

@@ -1,3 +1,4 @@
+use crate::coverage::Shallow;
 use crate::error::Result;
 
 use crate::pipeline::pass::PipelineContext;
@@ -240,6 +241,7 @@ async fn run_adversarial_review(
         label: "review".into(),
         budget_usd: ctx.allowance("review").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session
@@ -462,6 +464,27 @@ fn write_markdown_report(
             "> Vulnerabilities in the excluded contracts are **not reflected in this report**. \
              Fix the build errors and re-run the pipeline for complete coverage."
         )?;
+        writeln!(f)?;
+        writeln!(f, "---")?;
+        writeln!(f)?;
+    }
+
+    let shallow: Vec<Shallow> = std::fs::read_to_string(ctx.workspace.shallow_sessions())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    if !shallow.is_empty() {
+        writeln!(f, "## ⚠ Shallow Agent Sessions")?;
+        writeln!(f)?;
+        writeln!(
+            f,
+            "These Pass 2 sessions were resumed once and still left work undone. \
+             The code they owed has had less scrutiny than the rest:"
+        )?;
+        writeln!(f)?;
+        for s in &shallow {
+            writeln!(f, "- **{}**: {}", s.agent, s.missing.join("; "))?;
+        }
         writeln!(f)?;
         writeln!(f, "---")?;
         writeln!(f)?;

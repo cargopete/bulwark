@@ -26,9 +26,9 @@ pub async fn serve(
     );
     eprintln!(
         "  Scope: {} assets, {} components{}",
-        scope.assets.len(),
-        scope.components.len(),
-        if scope.assets.is_empty() && scope.components.is_empty() {
+        scope.owed.assets.len(),
+        scope.owed.components.len(),
+        if scope.owed.assets.is_empty() && scope.owed.components.is_empty() {
             " (no scope: every file counts)"
         } else {
             ""

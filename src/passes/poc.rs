@@ -383,6 +383,7 @@ async fn generate_and_validate_poc(
             label: format!("poc:{}", finding.id),
             budget_usd: attempt_cap,
             ledger: Some(ctx.ledger.clone()),
+            resume: None,
         };
         let _ = session.run_with_spinner("Generating PoC...").await;
 
@@ -826,6 +827,7 @@ async fn run_fp_check_filter(
             label: format!("fp_check:{}", finding.id),
             budget_usd: cap_each,
             ledger: Some(ctx.ledger.clone()),
+            resume: None,
         };
 
         let _ = session
