@@ -48,6 +48,15 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         all_agents.clone()
     };
 
+    let unmatchable = coverage::Scope::from_config(&ctx.config).drop_unmatchable(&ctx.audit_dir);
+    if !unmatchable.is_empty() {
+        eprintln!(
+            "  {} Not holding agents to asset names no source file matches: {}",
+            style("→").cyan(),
+            unmatchable.join(", ")
+        );
+    }
+
     let max_turns = ctx.config.passes.agents.max_turns;
     let timeout = Duration::from_secs(ctx.config.passes.agents.timeout_minutes * 60);
 
@@ -320,7 +329,8 @@ async fn run_single_agent(
         resume: None,
     };
 
-    let scope = coverage::Scope::from_config(&ctx.config);
+    let mut scope = coverage::Scope::from_config(&ctx.config);
+    scope.drop_unmatchable(&ctx.audit_dir);
     let thresholds = Thresholds::from_config(&ctx.config.passes.agents);
     let mut shallow = None;
     for attempt in 0..2 {

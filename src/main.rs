@@ -123,7 +123,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init(_) => unreachable!("handled before the config loads"),
         Commands::Dashboard(args) => {
             let ws = Workspace::new(&audit_dir, &config.workspace.path);
-            let scope = dashboard::status::Scope::from_config(&config);
+            let mut scope = dashboard::status::Scope::from_config(&config);
+            scope.owed.drop_unmatchable(&audit_dir);
             dashboard::serve(ws, scope, &args.bind, args.port).await?
         }
         Commands::Doctor => cmd_doctor(config)?,

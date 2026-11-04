@@ -34,6 +34,22 @@ impl Scope {
         }
     }
 
+    /// Drop asset names that no source file under `root` is named after: token names, chains,
+    /// typos on the scope page. Nobody can cover them, so nobody is held to them. Returns them.
+    pub fn drop_unmatchable(&mut self, root: &Path) -> Vec<String> {
+        let mut stems = HashSet::new();
+        source_stems(root, &mut stems);
+        let mut gone: Vec<String> = self
+            .assets
+            .iter()
+            .filter(|a| !stems.contains(a.as_str()))
+            .cloned()
+            .collect();
+        gone.sort();
+        self.assets.retain(|a| stems.contains(a.as_str()));
+        gone
+    }
+
     /// Coverage entries are free text that starts with a path.
     pub fn counts(&self, agent: &str, entry: &str) -> bool {
         let path = entry_path(entry);
@@ -60,6 +76,34 @@ impl Scope {
             path.starts_with(owed)
         } else {
             stem(path) == owed
+        }
+    }
+}
+
+const NOT_SOURCE: &[&str] = &[
+    ".git",
+    "node_modules",
+    "lib",
+    "dependencies",
+    "out",
+    "cache",
+    "artifacts",
+];
+
+fn source_stems(dir: &Path, stems: &mut HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if path.is_dir() {
+            if !NOT_SOURCE.contains(&name.as_ref()) {
+                source_stems(&path, stems);
+            }
+        } else if name.ends_with(".sol") || name.ends_with(".vy") {
+            stems.insert(stem(&name).to_string());
         }
     }
 }
@@ -255,6 +299,21 @@ mod tests {
             .into_iter()
             .collect(),
         }
+    }
+
+    #[test]
+    fn asset_names_no_file_matches_are_not_owed() {
+        let dir = tempfile::tempdir().unwrap();
+        for f in ["src/Vault.sol", "lib/oz/USDY.sol", "test/Shares.t.sol"] {
+            let p = dir.path().join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "").unwrap();
+        }
+        let mut s = scope();
+        s.assets.insert("USDY".into());
+        assert_eq!(s.drop_unmatchable(dir.path()), ["Shares", "USDY"]);
+        let read = json!([{"file": "src/Vault.sol", "read_in_full": true}]);
+        assert!(missing(&s, "blue", &ev(read, 0), &Thresholds::default()).is_empty());
     }
 
     fn ev(coverage: Value, forge: u64) -> Evidence {
