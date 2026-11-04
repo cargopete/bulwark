@@ -115,6 +115,15 @@ impl Ledger {
         self.save(&file)
     }
 
+    /// Mark every unsettled session as stopped, for when the run itself is killed.
+    pub fn stop_running(&self) -> Result<()> {
+        let mut file = self.lock();
+        for e in file.entries.iter_mut().filter(|e| e.outcome == "running") {
+            e.outcome = "stopped".into();
+        }
+        self.save(&file)
+    }
+
     fn save(&self, file: &LedgerFile) -> Result<()> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -277,5 +286,16 @@ mod tests {
         assert_eq!(resumed.remaining(), Some(15.0));
         let fresh = Ledger::open(path, Some(20.0), true).unwrap();
         assert_eq!(fresh.remaining(), Some(20.0));
+    }
+
+    #[test]
+    fn stopping_marks_only_unsettled_sessions() {
+        let (_d, l) = ledger(None);
+        let done = l.reserve("agent:red", None, None).unwrap();
+        l.settle(done, Some(1.0), Some(3), "success").unwrap();
+        l.reserve("formal:halmos", None, None).unwrap();
+        l.stop_running().unwrap();
+        let outcomes: Vec<String> = l.lock().entries.iter().map(|e| e.outcome.clone()).collect();
+        assert_eq!(outcomes, ["success", "stopped"]);
     }
 }

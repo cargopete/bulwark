@@ -57,6 +57,10 @@ impl Orchestrator {
         })
     }
 
+    pub fn ledger(&self) -> std::sync::Arc<Ledger> {
+        self.ctx.ledger.clone()
+    }
+
     pub async fn run(&self) -> Result<Vec<PassResult>> {
         self.print_banner();
         self.preflight()?;

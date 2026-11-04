@@ -155,7 +155,16 @@ async fn cmd_run(
     };
 
     let orchestrator = Orchestrator::new(config, audit_dir, bulwark_root, start, end, args.agent)?;
-    let results = orchestrator.run().await?;
+    let ledger = orchestrator.ledger();
+    let results = tokio::select! {
+        r = orchestrator.run() => r?,
+        sig = shutdown_signal() => {
+            // `docker stop` would otherwise leave every live session "running" on the dashboard.
+            ledger.stop_running()?;
+            eprintln!("\n  Stopped by {sig}; unfinished sessions marked stopped.");
+            std::process::exit(143);
+        }
+    };
 
     // Exit with error code if any pass failed
     if results
@@ -166,6 +175,15 @@ async fn cmd_run(
     }
 
     Ok(())
+}
+
+async fn shutdown_signal() -> &'static str {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install SIGTERM handler");
+    tokio::select! {
+        _ = term.recv() => "SIGTERM",
+        _ = tokio::signal::ctrl_c() => "SIGINT",
+    }
 }
 
 fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyhow::Result<()> {

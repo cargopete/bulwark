@@ -46,6 +46,8 @@ pub enum State {
     Done,
     Stalled,
     Failed,
+    /// The run was killed while this session was live; nothing to judge.
+    Stopped,
 }
 
 /// What a session's event stream says it has done so far.
@@ -266,9 +268,10 @@ pub fn classify(h: &HealthInput) -> (Health, Vec<String>) {
         }
         State::Stalled => red.push("stalled".into()),
         State::Failed => red.push("failed".into()),
-        State::Done => {}
+        State::Done | State::Stopped => {}
     }
-    if let (false, Some(a)) = (h.state == State::Running, &h.agent) {
+    let judged = !matches!(h.state, State::Running | State::Stopped);
+    if let (true, Some(a)) = (judged, &h.agent) {
         if !a.findings_file {
             red.push("no findings file".into());
         }
@@ -573,6 +576,7 @@ fn session_view(
         None => State::Running,
         Some("success") | Some("error_max_turns") => State::Done,
         Some("stalled") | Some("timed_out") => State::Stalled,
+        Some("stopped") => State::Stopped,
         Some(_) => State::Failed,
     };
 
@@ -666,7 +670,9 @@ fn pass_views(
                 ),
                 None if in_pass.is_empty() => ("pending".into(), None),
                 None => {
-                    let state = if in_pass.iter().any(|s| s.state == State::Running)
+                    let state = if in_pass.iter().any(|s| s.state == State::Stopped) {
+                        "stopped"
+                    } else if in_pass.iter().any(|s| s.state == State::Running)
                         || last_active == Some(i)
                     {
                         "running"
@@ -1117,6 +1123,16 @@ mod tests {
             };
             assert_eq!(classify(&h).0, Health::Red);
         }
+    }
+
+    #[test]
+    fn a_stopped_session_is_neither_silent_nor_judged() {
+        let h = HealthInput {
+            state: State::Stopped,
+            silent_s: SILENT_RED_SECS * 4,
+            ..hunter(None)
+        };
+        assert_eq!(classify(&h), (Health::Green, vec![]));
     }
 
     #[test]

@@ -233,7 +233,7 @@ const dur = (s) => {
 };
 const usd = (v) => v == null ? '' : '$' + v.toFixed(2);
 const VERDICT = { green: 'Healthy', amber: 'Needs a look', red: 'Faulty' };
-const STATE_BADGE = { running: 'b-accent', completed: 'b-ok', done: 'b-ok', failed: 'b-bad', stalled: 'b-bad', skipped: '', pending: '', not_implemented: '' };
+const STATE_BADGE = { running: 'b-accent', completed: 'b-ok', done: 'b-ok', failed: 'b-bad', stalled: 'b-bad', stopped: '', skipped: '', pending: '', not_implemented: '' };
 const POC_BADGE = { compiles_and_demonstrates: 'b-ok', demonstrated_local: 'b-accent' };
 const PIN = { matches_pin: 'b-ok', differs_from_pin: 'b-warn' };
 const PIN_LABEL = { matches_pin: 'matches', differs_from_pin: 'differs', no_pin: 'no pin' };
