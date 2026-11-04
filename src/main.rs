@@ -11,6 +11,7 @@ mod error;
 mod findings;
 mod known;
 mod passes;
+mod pin;
 mod pipeline;
 mod program;
 mod program_import;

@@ -47,6 +47,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     if let Some(ref review) = review_data {
         apply_review_adjustments(&mut all_findings, review, ctx);
     }
+    // Reinstated and fuzz/formal findings have not been through Pass 3's pin check.
+    crate::pin::tag(ctx, &mut all_findings);
 
     // Sort by severity descending
     all_findings.sort_by(|a, b| {
@@ -138,6 +140,7 @@ pub fn generate_report(ctx: &PipelineContext) -> Result<String> {
     if let Some(ref review) = review_data {
         apply_review_adjustments(&mut all_findings, review, ctx);
     }
+    crate::pin::tag(ctx, &mut all_findings);
 
     all_findings.sort_by(|a, b| {
         let sa = severity_rank(a.get("severity").and_then(|s| s.as_str()).unwrap_or(""));
@@ -536,8 +539,14 @@ fn write_markdown_report(
     if total > 0 {
         writeln!(f, "## Findings")?;
         writeln!(f)?;
-        writeln!(f, "| ID | Severity | Title | Contract | PoC Status |")?;
-        writeln!(f, "|----|----------|-------|----------|------------|")?;
+        writeln!(
+            f,
+            "| ID | Severity | Title | Contract | PoC Status | Scope Pin |"
+        )?;
+        writeln!(
+            f,
+            "|----|----------|-------|----------|------------|-----------|"
+        )?;
 
         for finding in findings {
             let id = finding.get("id").and_then(|v| v.as_str()).unwrap_or("-");
@@ -551,7 +560,11 @@ fn write_markdown_report(
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
             let poc = poc_label(finding);
-            writeln!(f, "| {id} | {sev} | {title} | {contract} | {poc} |")?;
+            let pin = finding
+                .get("scope_pin")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            writeln!(f, "| {id} | {sev} | {title} | {contract} | {poc} | {pin} |")?;
         }
         writeln!(f)?;
 
@@ -605,6 +618,24 @@ fn write_markdown_report(
             writeln!(f)?;
             writeln!(f, "**PoC status**: {poc_status}")?;
             writeln!(f)?;
+            if let Some(pin) = finding.get("scope_pin").and_then(|v| v.as_str()) {
+                let commit = finding
+                    .get("scope_pin_commit")
+                    .and_then(|v| v.as_str())
+                    .map(|c| format!(" at `{}`", &c[..c.len().min(10)]))
+                    .unwrap_or_default();
+                let note = finding
+                    .get("scope_pin_note")
+                    .and_then(|v| v.as_str())
+                    .map(|n| format!(" ({n})"))
+                    .unwrap_or_default();
+                writeln!(f, "**Scope pin**: {pin}{commit}{note}")?;
+                writeln!(f)?;
+                if let Some(diff) = finding.get("scope_pin_diff").and_then(|v| v.as_str()) {
+                    writeln!(f, "```diff\n{diff}\n```")?;
+                    writeln!(f)?;
+                }
+            }
             writeln!(f, "---")?;
             writeln!(f)?;
         }

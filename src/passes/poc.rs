@@ -203,6 +203,20 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
     }
 
+    crate::pin::tag(ctx, &mut validated);
+    crate::pin::tag(ctx, &mut unverifiable);
+    let differs = validated
+        .iter()
+        .chain(&unverifiable)
+        .filter(|f| f["scope_pin"] == "differs_from_pin")
+        .count();
+    if differs > 0 {
+        eprintln!(
+            "  {} {differs} surviving finding(s) touch code that differs from the file's scope pin",
+            style("⚠").yellow()
+        );
+    }
+
     // Write validated findings
     write_json(
         &ctx.workspace.validated_findings(),
