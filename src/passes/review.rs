@@ -550,10 +550,7 @@ fn write_markdown_report(
                 .get("contract")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            let poc = finding
-                .get("poc_status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let poc = poc_label(finding);
             writeln!(f, "| {id} | {sev} | {title} | {contract} | {poc} |")?;
         }
         writeln!(f)?;
@@ -593,10 +590,7 @@ fn write_markdown_report(
                 .get("attack_scenario")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            let poc_status = finding
-                .get("poc_status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let poc_status = poc_label(finding);
 
             writeln!(f, "### {id}: {title}")?;
             writeln!(f)?;
@@ -753,6 +747,17 @@ fn resolve_challenge(
     }
 }
 
+fn poc_label(finding: &Value) -> String {
+    let status = finding
+        .get("poc_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    match finding.get("poc_mode").and_then(|v| v.as_str()) {
+        Some(mode) => format!("{status} ({mode})"),
+        None => status.to_string(),
+    }
+}
+
 fn count_severity(findings: &[Value], severity: &str) -> usize {
     findings
         .iter()
@@ -780,6 +785,13 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn poc_label_shows_the_mode_when_known() {
+        let f = json!({"poc_status": "demonstrated_local", "poc_mode": "local"});
+        assert_eq!(poc_label(&f), "demonstrated_local (local)");
+        assert_eq!(poc_label(&json!({"poc_status": "x"})), "x");
+    }
 
     fn program() -> ProgramConfig {
         toml::from_str(
