@@ -3,11 +3,12 @@
 //! The page is a Next.js app-router render; the program sits in the RSC payload as a
 //! `{"bounty": {...}}` object, with long text fields as `$<id>` references to `T` rows.
 
+use crate::config::TargetConfig;
 use crate::error::{BulwarkError, Result};
 use crate::findings::Severity;
 use crate::program::{Asset, Impact, OutOfScope, ProgramConfig};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The RSC payload strings pushed by `self.__next_f.push([1, "..."])`, joined.
@@ -102,10 +103,78 @@ fn explorer_address(url: &str) -> Option<(Option<u64>, String)> {
     Some((chain, addr.to_lowercase()))
 }
 
+/// A file pinned by a GitHub blob URL: `github.com/<owner>/<repo>/blob/<commit>/<path>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Blob {
+    pub repo: String,
+    pub commit: String,
+    pub path: String,
+}
+
+fn github_blob(url: &str) -> Option<Blob> {
+    let url = url.split(['?', '#']).next()?;
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let rest = rest.strip_prefix("www.").unwrap_or(rest);
+    let mut parts = rest.strip_prefix("github.com/")?.splitn(5, '/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    if parts.next()? != "blob" {
+        return None;
+    }
+    let (commit, path) = (parts.next()?, parts.next()?);
+    if owner.is_empty() || repo.is_empty() || commit.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(Blob {
+        repo: format!("{owner}/{repo}").to_lowercase(),
+        commit: commit.to_string(),
+        path: path.trim_end_matches('/').to_string(),
+    })
+}
+
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "sol", "vy", "rs", "move", "cairo", "fc", "func", "tact", "huff", "yul",
+];
+
+/// Contract name from a source file path: the stem, if the extension is a contract language.
+fn contract_name(path: &str) -> Option<String> {
+    let file = path.rsplit('/').next()?;
+    let (stem, ext) = file.rsplit_once('.')?;
+    (!stem.is_empty() && SOURCE_EXTENSIONS.contains(&ext)).then(|| stem.to_string())
+}
+
+/// Distinct commits pinned by blob URLs with their file counts, most files first.
+pub fn pinned_commits(assets: &[Asset]) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for b in assets.iter().filter_map(|a| github_blob(a.url.as_deref()?)) {
+        *counts.entry(b.commit).or_default() += 1;
+    }
+    let mut out: Vec<_> = counts.into_iter().collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
+/// `owner/repo` of a GitHub clone URL, https or ssh.
+fn github_repo(url: &str) -> Option<String> {
+    let rest = url
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .split("github.com")
+        .nth(1)?;
+    let rest = rest.trim_start_matches([':', '/']);
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    (!owner.is_empty() && !repo.is_empty() && parts.next().is_none())
+        .then(|| format!("{owner}/{repo}").to_lowercase())
+}
+
 pub struct Imported {
     pub program: ProgramConfig,
     /// The raw bounty object, kept as the snapshot the next import diffs against.
     pub snapshot: Value,
+    /// Asset URLs that are neither a source file nor an explorer address.
+    pub skipped: Vec<String>,
 }
 
 pub fn parse_scope_page(html: &str) -> Result<Imported> {
@@ -140,27 +209,32 @@ pub fn parse_scope_page(html: &str) -> Result<Imported> {
     let mut impacts = impacts;
     impacts.sort_by_key(|i| std::cmp::Reverse(i.severity));
 
-    let assets = bounty
+    let mut assets = Vec::new();
+    let mut skipped = Vec::new();
+    let urls = bounty
         .get("assets")
         .and_then(|a| a.as_array())
         .into_iter()
         .flatten()
         .filter(smart)
-        .filter_map(|a| {
-            let url = a.get("url")?.as_str()?.to_string();
-            let (chain_id, address) = match explorer_address(&url) {
-                Some((c, a)) => (c, Some(a)),
-                None => (None, None),
-            };
-            Some(Asset {
-                name: String::new(),
-                address,
-                chain_id,
-                url: Some(url),
-                kind: "smart_contract".into(),
-            })
-        })
-        .collect();
+        .filter_map(|a| a.get("url")?.as_str());
+    for url in urls {
+        let (name, address, chain_id) = if let Some((chain, addr)) = explorer_address(url) {
+            (String::new(), Some(addr), chain)
+        } else if let Some(name) = github_blob(url).and_then(|b| contract_name(&b.path)) {
+            (name, None, None)
+        } else {
+            skipped.push(url.to_string());
+            continue;
+        };
+        assets.push(Asset {
+            name,
+            address,
+            chain_id,
+            url: Some(url.to_string()),
+            kind: "smart_contract".into(),
+        });
+    }
 
     let program_specific = text_field(&payload, bounty, "customOutOfScopeInformation")
         .map(|t| bullets(&t))
@@ -186,6 +260,7 @@ pub fn parse_scope_page(html: &str) -> Result<Imported> {
     Ok(Imported {
         program,
         snapshot: bounty.clone(),
+        skipped,
     })
 }
 
@@ -216,12 +291,12 @@ pub fn to_toml(p: &ProgramConfig) -> Result<String> {
     let body = toml::to_string(&Wrap { program: p })
         .map_err(|e| BulwarkError::Config(format!("could not write program.toml: {e}")))?;
     Ok(format!(
-        "# Imported by `bulwark program import`. Asset names are empty: fill each `name`\n\
-         # with the contract name as it appears in source, or assets do not filter findings.\n\n{body}"
+        "# Imported by `bulwark program import`. Names come from source file names; fill any\n\
+         # empty `name` with the contract name as in source, or that asset filters nothing.\n\n{body}"
     ))
 }
 
-pub async fn run(url: &str, project_dir: &Path) -> Result<()> {
+pub async fn run(url: &str, project_dir: &Path, target: &TargetConfig) -> Result<()> {
     let out = crate::tools::run_command_strict(
         "curl",
         &["-sSLf", "-A", "bulwark-program-import", url],
@@ -257,7 +332,155 @@ pub async fn run(url: &str, project_dir: &Path) -> Result<()> {
         p.assets.len(),
         p.out_of_scope.program_specific.len()
     );
+    for url in &imported.skipped {
+        eprintln!("  warning: skipped {url}: not a source file or explorer address");
+    }
+    report_pins(p, target, project_dir).await;
     Ok(())
+}
+
+async fn report_pins(p: &ProgramConfig, target: &TargetConfig, dir: &Path) {
+    let pins = pinned_commits(&p.assets);
+    if pins.is_empty() {
+        return;
+    }
+    eprintln!("  Assets pinned at {} commits:", pins.len());
+    for (commit, n) in &pins {
+        let s = if *n == 1 { "" } else { "s" };
+        eprintln!("    {}  {n} file{s}", short(commit));
+    }
+    let blobs: Vec<Blob> = p
+        .assets
+        .iter()
+        .filter_map(|a| github_blob(a.url.as_deref()?))
+        .collect();
+    let fallback = &pins[0].0;
+    let Some(repo) = github_repo(&target.repo).filter(|r| blobs.iter().any(|b| &b.repo == r))
+    else {
+        eprintln!(
+            "  Branch check skipped: no blob URL is in target.repo ({})",
+            target.repo
+        );
+        eprintln!(
+            "  Suggested target.commit: {} (pins the most files)",
+            short(fallback)
+        );
+        return;
+    };
+    let blobs: Vec<Blob> = blobs.into_iter().filter(|b| b.repo == repo).collect();
+    match check_branch(&repo, &target.branch, &blobs, dir).await {
+        Ok(check) => {
+            eprintln!(
+                "  {} of {} pinned files differ at {} ({}):",
+                check.differ.len(),
+                blobs.len(),
+                target.branch,
+                short(&check.head)
+            );
+            for b in &check.differ {
+                eprintln!("    {} (pinned {})", b.path, short(&b.commit));
+            }
+            match check.newest_ancestor {
+                Some(c) => eprintln!(
+                    "  Suggested target.commit: {} (newest pin contained in {})",
+                    short(&c),
+                    target.branch
+                ),
+                None => eprintln!(
+                    "  Suggested target.commit: {} (pins the most files; no pin is in {})",
+                    short(fallback),
+                    target.branch
+                ),
+            }
+        }
+        Err(e) => {
+            let e = e.to_string();
+            eprintln!(
+                "  Branch check skipped: {}",
+                e.lines().next().unwrap_or_default()
+            );
+            eprintln!(
+                "  Suggested target.commit: {} (pins the most files)",
+                short(fallback)
+            );
+        }
+    }
+}
+
+fn short(commit: &str) -> &str {
+    commit.get(..8).unwrap_or(commit)
+}
+
+struct BranchCheck {
+    head: String,
+    differ: Vec<Blob>,
+    newest_ancestor: Option<String>,
+}
+
+async fn gh_api(path: &str, dir: &Path) -> Result<Value> {
+    let out = crate::tools::run_command_strict("gh", &["api", path], dir).await?;
+    Ok(serde_json::from_slice(&out.stdout)?)
+}
+
+/// Blob sha of every file in the tree at `rev`.
+async fn tree(repo: &str, rev: &str, dir: &Path) -> Result<BTreeMap<String, String>> {
+    let t = gh_api(&format!("repos/{repo}/git/trees/{rev}?recursive=1"), dir).await?;
+    // A truncated tree would report the files it left out as changed.
+    if t.get("truncated").and_then(|v| v.as_bool()) != Some(false) {
+        return Err(BulwarkError::Config(format!(
+            "tree of {repo} at {rev} is truncated"
+        )));
+    }
+    Ok(t.get("tree")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some((
+                e.get("path")?.as_str()?.into(),
+                e.get("sha")?.as_str()?.into(),
+            ))
+        })
+        .collect())
+}
+
+async fn check_branch(repo: &str, branch: &str, blobs: &[Blob], dir: &Path) -> Result<BranchCheck> {
+    let head: String = gh_api(&format!("repos/{repo}/commits/{branch}"), dir)
+        .await?
+        .get("sha")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| BulwarkError::Config(format!("no head commit for {repo} {branch}")))?
+        .into();
+    let at_head = tree(repo, &head, dir).await?;
+    let commits: BTreeSet<&str> = blobs.iter().map(|b| b.commit.as_str()).collect();
+    let mut differ = Vec::new();
+    let mut newest: Option<(u64, String)> = None;
+    for commit in commits {
+        let pinned = tree(repo, commit, dir).await?;
+        for b in blobs.iter().filter(|b| b.commit == commit) {
+            let sha = pinned.get(&b.path);
+            if sha.is_none() || sha != at_head.get(&b.path) {
+                differ.push(b.clone());
+            }
+        }
+        let cmp = gh_api(&format!("repos/{repo}/compare/{commit}...{head}"), dir).await?;
+        let status = cmp.get("status").and_then(|s| s.as_str());
+        let ahead = cmp
+            .get("ahead_by")
+            .and_then(|a| a.as_u64())
+            .unwrap_or(u64::MAX);
+        if matches!(status, Some("ahead" | "identical"))
+            && newest.as_ref().is_none_or(|(n, _)| ahead < *n)
+        {
+            newest = Some((ahead, commit.to_string()));
+        }
+    }
+    differ.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(BranchCheck {
+        head,
+        differ,
+        newest_ancestor: newest.map(|(_, c)| c),
+    })
 }
 
 #[cfg(test)]
@@ -273,6 +496,7 @@ mod tests {
 
     const BOUNTY: &str = r#"c:["$","$L64",null,{"bounty":{"slug":"demo","maxBounty":2000000,"kyc":true,
         "assets":[{"url":"https://etherscan.io/address/0xAE7ab96520DE3A18E5e111B5EaAb095312D7fE84","type":"smart_contract"},
+                  {"url":"https://github.com/demo/core/blob/abc123/src/Vault.sol#L10","type":"smart_contract"},
                   {"url":"https://github.com/demo/core","type":"smart_contract"},
                   {"url":"https://demo.fi","type":"websites_and_applications"}],
         "impacts":[{"type":"smart_contract","severity":"high","title":"Theft of unclaimed yield"},
@@ -298,11 +522,62 @@ mod tests {
             p.assets[0].address.as_deref(),
             Some("0xae7ab96520de3a18e5e111b5eaab095312d7fe84")
         );
+        assert_eq!(p.assets[0].name, "");
         assert_eq!(p.assets[1].address, None);
+        assert_eq!(p.assets[1].name, "Vault");
         assert_eq!(
             p.out_of_scope.program_specific,
             vec!["Best practice critiques", "Frontrunning"]
         );
+    }
+
+    #[test]
+    fn names_come_from_source_blobs_only() {
+        let b =
+            github_blob("https://github.com/Org/Repo/blob/d8a522d6/src/shares/Shares.sol").unwrap();
+        assert_eq!(b.repo, "org/repo");
+        assert_eq!(b.commit, "d8a522d6");
+        assert_eq!(b.path, "src/shares/Shares.sol");
+        assert_eq!(contract_name(&b.path).as_deref(), Some("Shares"));
+        assert_eq!(contract_name("contracts/Pool.vy").as_deref(), Some("Pool"));
+        assert_eq!(contract_name("sources/coin.move").as_deref(), Some("coin"));
+        assert_eq!(contract_name("README.md"), None);
+        assert!(github_blob("https://github.com/org/repo/tree/main/src").is_none());
+        assert!(github_blob("https://immunefi.com/").is_none());
+    }
+
+    #[test]
+    fn target_repo_url_forms() {
+        for url in [
+            "https://github.com/enzymefinance/protocol-onyx.git",
+            "https://github.com/enzymefinance/protocol-onyx/",
+            "git@github.com:enzymefinance/protocol-onyx.git",
+        ] {
+            assert_eq!(
+                github_repo(url).as_deref(),
+                Some("enzymefinance/protocol-onyx")
+            );
+        }
+        assert_eq!(github_repo("https://gitlab.com/a/b"), None);
+    }
+
+    /// Asset URLs from the Enzyme Onyx scope page as imported on 2026-11.
+    #[test]
+    fn onyx_assets() {
+        let bounty: Value =
+            serde_json::from_str(include_str!("../testdata/onyx-bounty.json")).unwrap();
+        let payload = format!("{}", serde_json::json!({ "bounty": bounty }));
+        let imported = parse_scope_page(&page(&payload)).unwrap();
+        let assets = &imported.program.assets;
+        assert_eq!(assets.len(), 45);
+        assert!(assets.iter().all(|a| !a.name.is_empty()));
+        assert!(assets.iter().any(|a| a.name == "Shares"));
+        assert_eq!(imported.skipped, vec!["https://immunefi.com/"]);
+
+        let pins = pinned_commits(assets);
+        assert_eq!(pins.len(), 9);
+        assert_eq!(pins.iter().map(|(_, n)| n).sum::<usize>(), 45);
+        assert!(pins[0].0.starts_with("7b48d243"));
     }
 
     #[test]

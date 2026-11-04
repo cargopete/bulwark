@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or_else(|| std::path::Path::new("."));
-            program_import::run(&url, dir).await?
+            program_import::run(&url, dir, &config.target).await?
         }
     }
 

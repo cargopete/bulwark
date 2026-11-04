@@ -132,11 +132,8 @@ impl ProgramConfig {
         if self.assets.iter().all(|a| a.name.is_empty()) {
             return true;
         }
-        let stem = contract
-            .rsplit('/')
-            .next()
-            .unwrap_or(contract)
-            .trim_end_matches(".sol");
+        let file = contract.rsplit('/').next().unwrap_or(contract);
+        let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
         self.assets.iter().any(|a| a.name == stem)
     }
 
@@ -230,6 +227,7 @@ program_specific = ["Frontrunning, including back-running and sandwich attacks"]
         assert!(p.has_asset("Vault"));
         assert!(p.has_asset("Vault.sol"));
         assert!(p.has_asset("src/core/Vault.sol"));
+        assert!(p.has_asset("contracts/Vault.vy"));
         assert!(!p.has_asset("VaultHelper.sol"));
     }
 
