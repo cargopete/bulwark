@@ -162,6 +162,30 @@ elif [ -d "packages" ]; then
     done
 fi
 
+# ── Fork proxy ──────────────────────────────────────────────────────
+# forge test cannot send RPC headers, so an authenticated upstream is fronted by a local anvil
+# pinned at the config's fork_block. PoCs fork the proxy; the token never reaches them.
+FORK_BLOCK=$(grep -E '^fork_block *=' "$PROJECT_CONFIG" 2>/dev/null | head -1 | sed 's/[^0-9]//g' || true)
+if [ -n "${BULWARK_FORK_UPSTREAM:-}" ] && [ -n "$FORK_BLOCK" ]; then
+    echo "→ Starting fork proxy at block $FORK_BLOCK..."
+    auth=()
+    [ -n "${BULWARK_FORK_UPSTREAM_TOKEN:-}" ] && auth=(--fork-header "Authorization: Bearer $BULWARK_FORK_UPSTREAM_TOKEN")
+    anvil --fork-url "$BULWARK_FORK_UPSTREAM" "${auth[@]}" --fork-block-number "$FORK_BLOCK" \
+        --host 127.0.0.1 --port 8545 --silent > /tmp/fork-proxy.log 2>&1 &
+    unset BULWARK_FORK_UPSTREAM_TOKEN
+    for _ in $(seq 1 30); do
+        cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1 && break
+        sleep 1
+    done
+    if cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then
+        export BULWARK_FORK_RPC=http://127.0.0.1:8545
+        echo "  ✓ Fork proxy ready"
+    else
+        echo "  ✗ Fork proxy did not start; PoCs run in local mode"
+        tail -5 /tmp/fork-proxy.log
+    fi
+fi
+
 # ── Restore Claude Code settings ────────────────────────────────────
 cp /home/auditor/.bulwark-settings.json /home/auditor/.claude/settings.json 2>/dev/null || true
 

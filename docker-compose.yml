@@ -9,6 +9,9 @@ services:
       # A login carries the account's claude.ai connectors (Gmail, Slack, Drive). Agents read
       # untrusted target code with Bash, so they must not have them.
       - ENABLE_CLAUDEAI_MCP_SERVERS=false
+      # Optional authenticated RPC for fork-mode PoCs, fronted by a local anvil (see entrypoint).
+      - BULWARK_FORK_UPSTREAM=${BULWARK_FORK_UPSTREAM:-}
+      - BULWARK_FORK_UPSTREAM_TOKEN=${BULWARK_FORK_UPSTREAM_TOKEN:-}
       # BULWARK_ROOT = project dir (bulwark.toml + context/ + optional prompts/ overrides).
       # Set BULWARK_PROJECT on the host to point at your project directory.
       # Default: current directory (works when running from inside a project dir).
