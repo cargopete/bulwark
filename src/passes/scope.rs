@@ -189,7 +189,7 @@ async fn classify(
         prompt,
         max_turns: 3,
         working_dir: ctx.audit_dir.clone(),
-        log_file: log_file.clone(),
+        log_file,
         model: Some(ctx.config.model_for("scope_check")),
         allowed_tools: vec!["Write".into()],
         timeout_minutes: Some(10),
@@ -199,9 +199,7 @@ async fn classify(
     };
     let _ = session.run_with_spinner("Scope classifier...").await;
 
-    let text = std::fs::read_to_string(&out_file)
-        .or_else(|_| std::fs::read_to_string(&log_file))
-        .ok()?;
+    let text = std::fs::read_to_string(&out_file).ok()?;
     let verdicts = first_json_array(&text)?;
     Some(parse_verdicts(&verdicts))
 }

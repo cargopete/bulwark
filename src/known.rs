@@ -183,9 +183,7 @@ pub async fn records(
     };
     let _ = session.run_with_spinner("Extracting known issues...").await;
 
-    let text = std::fs::read_to_string(&out_file)
-        .or_else(|_| std::fs::read_to_string(known_dir(ctx).join("extract.log")))
-        .unwrap_or_default();
+    let text = std::fs::read_to_string(&out_file).unwrap_or_default();
     let records: Vec<KnownRecord> = first_json_array(&text)
         .unwrap_or_default()
         .into_iter()
@@ -381,13 +379,13 @@ async fn adjudicate(
         serde_json::to_string_pretty(pairs).unwrap_or_default(),
         out_file.display()
     );
-    let log = known_dir(ctx).join("match.log");
+
     let session = ClaudeSession {
         claude_bin: claude_bin.to_path_buf(),
         prompt,
         max_turns: 20,
         working_dir: ctx.audit_dir.clone(),
-        log_file: log.clone(),
+        log_file: known_dir(ctx).join("match.log"),
         model: Some(ctx.config.model_for("known_match")),
         allowed_tools: vec![],
         timeout_minutes: Some(30),
@@ -398,13 +396,21 @@ async fn adjudicate(
     let _ = session
         .run_with_spinner("Matching against known issues...")
         .await;
-    let text = std::fs::read_to_string(&out_file)
-        .or_else(|_| std::fs::read_to_string(&log))
-        .unwrap_or_default();
+    // Fail open: a missed duplicate costs a PoC, a false one loses a bug.
+    let text = match std::fs::read_to_string(&out_file) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "  {} Known-issue matcher failed: {}: {e}; nothing suppressed",
+                style("✗").red(),
+                out_file.display()
+            );
+            return vec![];
+        }
+    };
     match first_json_array(&text) {
         Some(arr) => parse_verdicts(&arr),
         None => {
-            // Fail open: a missed duplicate costs a PoC, a false one loses a bug.
             eprintln!(
                 "  {} Known-issue matcher gave no verdicts; nothing suppressed",
                 style("⚠").yellow()

@@ -7,6 +7,7 @@ use crate::passes::poc_evidence::{
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::{self, ClaudeSession};
 use console::style;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -757,6 +758,7 @@ async fn run_fp_check_filter(
 
     let logs_dir = ctx.workspace.pocs_dir().join("fp-check-logs");
     std::fs::create_dir_all(&logs_dir)?;
+    std::fs::create_dir_all(ctx.workspace.fp_check_dir())?;
 
     let mut survivors = Vec::new();
     let mut filtered_count = 0;
@@ -772,6 +774,8 @@ async fn run_fp_check_filter(
 
         let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
         let log_file = logs_dir.join(format!("{}-fp-check.log", finding.id));
+        let verdict_file = ctx.workspace.fp_check_verdict(&finding.id);
+        let _ = std::fs::remove_file(&verdict_file);
 
         let prompt = format!(
             "Run /tob-fp-check on this finding.\n\n\
@@ -779,7 +783,7 @@ async fn run_fp_check_filter(
              Your job is to verify whether the vulnerable code path described could \
              plausibly exist and be reachable. Read the relevant source files before deciding.\n\n\
              Verdict rules — be conservative about calling FALSE_POSITIVE:\n\
-             - CONFIRMED: the vulnerable code pattern exists in source and the attack path \
+             - TRUE_POSITIVE: the vulnerable code pattern exists in source and the attack path \
                is plausible given the access control.\n\
              - FALSE_POSITIVE: you have found CONCRETE code evidence that the attack \
                is impossible — e.g. the function does not exist, a require() definitively \
@@ -788,10 +792,12 @@ async fn run_fp_check_filter(
                is what Pass 3 is for.\n\
              - UNCERTAIN: the code is complex, ambiguous, or you cannot determine \
                reachability within your turn budget. Default to this when in doubt.\n\n\
-             Respond with ONLY one verdict on a single line:\n\
-             CONFIRMED: <one-sentence reason>\n\
-             FALSE_POSITIVE: <one-sentence reason>\n\
-             UNCERTAIN: <one-sentence reason>"
+             Write your verdict as a JSON object to `{}`:\n\
+             {{\"finding_id\": \"{}\", \"verdict\": \"TRUE_POSITIVE|FALSE_POSITIVE|UNCERTAIN\", \
+             \"reason\": \"one sentence\"}}\n\n\
+             Only that file is read; your final message is not.",
+            verdict_file.display(),
+            finding.id,
         );
 
         let session = ClaudeSession {
@@ -799,7 +805,7 @@ async fn run_fp_check_filter(
             prompt,
             max_turns: ctx.config.passes.poc.fp_check_max_turns,
             working_dir: ctx.audit_dir.clone(),
-            log_file: log_file.clone(),
+            log_file,
             model: Some(ctx.config.model_for("fp_check")),
             allowed_tools: vec![],
             timeout_minutes: Some(15),
@@ -808,18 +814,11 @@ async fn run_fp_check_filter(
             ledger: Some(ctx.ledger.clone()),
         };
 
-        let result = session
+        let _ = session
             .run_with_spinner(&format!("Analysing {}...", finding.id))
             .await;
 
-        // Parse result: check if output contains FALSE_POSITIVE
-        // Fail open: on error, keep the finding
-        let is_fp = result.is_ok()
-            && std::fs::read_to_string(&log_file)
-                .unwrap_or_default()
-                .contains("FALSE_POSITIVE");
-
-        if is_fp {
+        if fp_check_discards(&verdict_file, &finding.id) {
             eprintln!("      {} FALSE POSITIVE — filtered", style("✗").red());
             filtered_count += 1;
         } else {
@@ -835,8 +834,98 @@ async fn run_fp_check_filter(
     Ok(survivors)
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum FpVerdict {
+    TruePositive,
+    FalsePositive,
+    Uncertain,
+}
+
+#[derive(Debug, Deserialize)]
+struct FpCheckVerdict {
+    finding_id: String,
+    verdict: FpVerdict,
+    #[serde(default)]
+    reason: String,
+}
+
+fn read_fp_verdict(path: &Path, finding_id: &str) -> std::result::Result<FpCheckVerdict, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let v: FpCheckVerdict =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    if v.finding_id != finding_id {
+        return Err(format!("verdict is for {}, not {finding_id}", v.finding_id));
+    }
+    Ok(v)
+}
+
+/// Fails open: a missing or unreadable verdict keeps the finding.
+fn fp_check_discards(verdict_file: &Path, finding_id: &str) -> bool {
+    match read_fp_verdict(verdict_file, finding_id) {
+        Ok(v) => v.verdict == FpVerdict::FalsePositive,
+        Err(e) => {
+            eprintln!(
+                "      {} no usable verdict ({e}), passing through",
+                style("⚠").yellow()
+            );
+            false
+        }
+    }
+}
+
 fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verdict_file_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("F-001.json");
+        std::fs::write(
+            &path,
+            r#"{"finding_id": "F-001", "verdict": "FALSE_POSITIVE", "reason": "require blocks it"}"#,
+        )
+        .unwrap();
+        let v = read_fp_verdict(&path, "F-001").unwrap();
+        assert_eq!(v.verdict, FpVerdict::FalsePositive);
+        assert_eq!(v.reason, "require blocks it");
+        assert!(fp_check_discards(&path, "F-001"));
+
+        assert!(read_fp_verdict(&path, "F-002").is_err());
+        std::fs::write(&path, r#"{"finding_id": "F-001", "verdict": "CONFIRMED"}"#).unwrap();
+        assert!(read_fp_verdict(&path, "F-001").is_err());
+    }
+
+    #[test]
+    fn negated_verdict_word_in_log_keeps_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("F-001-fp-check.log"),
+            "This is not a FALSE_POSITIVE: the path is reachable.",
+        )
+        .unwrap();
+        let path = dir.path().join("F-001.json");
+        std::fs::write(
+            &path,
+            r#"{"finding_id": "F-001", "verdict": "TRUE_POSITIVE", "reason": "reachable"}"#,
+        )
+        .unwrap();
+        assert!(!fp_check_discards(&path, "F-001"));
+    }
+
+    #[test]
+    fn missing_verdict_file_passes_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("F-001.json");
+        assert!(!fp_check_discards(&path, "F-001"));
+        std::fs::write(&path, "FALSE_POSITIVE").unwrap();
+        assert!(!fp_check_discards(&path, "F-001"));
+    }
 }
