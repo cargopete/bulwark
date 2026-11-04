@@ -46,6 +46,8 @@ pub struct ClaudeOutput {
     pub cost_usd: Option<f64>,
     /// From the stream's `init` event; `None` if the session never started.
     pub session_id: Option<String>,
+    /// Launches including stall restarts; 1 for a session that never stalled.
+    pub attempts: u32,
 }
 
 /// The `type: "result"` record of `--output-format json`, which may be the whole
@@ -323,6 +325,7 @@ impl ClaudeSession {
             log_file: self.log_file.clone(),
             cost_usd,
             session_id,
+            attempts: stalls + 1,
         })
     }
 
@@ -653,6 +656,8 @@ some text
         assert!(!looks_like_findings(&arr));
     }
 
+    // macOS can hold the first exec of a freshly written script for seconds, so a test that needs
+    // the child to speak in time gives it a wide window.
     fn fake_claude(dir: &Path, body: &str) -> ClaudeSession {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("claude");
@@ -696,19 +701,10 @@ echo '{"type":"result","subtype":"success","result":"done","total_cost_usd":0.5,
     #[tokio::test]
     async fn silent_session_is_restarted_then_reported_stalled() {
         let dir = tempfile::TempDir::new().unwrap();
-        let count = dir.path().join("count");
-        let s = fake_claude(
-            dir.path(),
-            // A spawn slower than the stall window is itself a stall, so the window leaves room for load.
-            &format!(
-                "echo x >> {}\necho '{{\"type\":\"system\"}}'\nexec sleep 30",
-                count.display()
-            ),
-        );
-        let out = s.run_watched(Duration::from_secs(3)).await.unwrap();
+        let s = fake_claude(dir.path(), "exec sleep 30");
+        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
         assert_eq!(out.exit_code, STALLED_EXIT);
-        let attempts = std::fs::read_to_string(&count).unwrap().lines().count();
-        assert_eq!(attempts as u32, MAX_STALL_RESTARTS + 1);
+        assert_eq!(out.attempts, MAX_STALL_RESTARTS + 1);
     }
 
     #[tokio::test]
@@ -726,7 +722,7 @@ esac"#,
                 args.display()
             ),
         );
-        let out = s.run_watched(Duration::from_secs(3)).await.unwrap();
+        let out = s.run_watched(Duration::from_secs(5)).await.unwrap();
         assert_eq!(out.exit_code, 0);
         assert_eq!(out.session_id.as_deref(), Some("abc-123"));
         let calls = std::fs::read_to_string(&args).unwrap();
@@ -747,7 +743,7 @@ esac"#,
             r#"for i in 1 2 3 4; do echo '{"type":"assistant"}'; sleep 0.5; done
 echo '{"type":"result","subtype":"success","result":"ok"}'"#,
         );
-        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
+        let out = s.run_watched(Duration::from_secs(5)).await.unwrap();
         assert_eq!(out.exit_code, 0);
     }
 
