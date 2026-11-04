@@ -89,6 +89,14 @@ impl Workspace {
         self.pocs_dir().join("unverifiable-findings.json")
     }
 
+    pub fn fp_check_dir(&self) -> PathBuf {
+        self.pocs_dir().join("fp-check")
+    }
+
+    pub fn fp_check_verdict(&self, finding_id: &str) -> PathBuf {
+        self.fp_check_dir().join(format!("{finding_id}.json"))
+    }
+
     pub fn final_report_md(&self) -> PathBuf {
         self.root.join("final-report.md")
     }
