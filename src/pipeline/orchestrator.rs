@@ -103,6 +103,11 @@ impl Orchestrator {
         eprintln!();
 
         for pass_num in PassNumber::all() {
+            if claude::auth_failed() {
+                return Err(BulwarkError::ClaudeAuth(
+                    "fix the login and resume with --resume".into(),
+                ));
+            }
             let num = *pass_num as u8;
             if num < self.start_pass || num > self.end_pass {
                 continue;

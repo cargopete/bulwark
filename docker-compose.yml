@@ -25,7 +25,7 @@ services:
       # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
       # Mount host Claude credentials (login auth only — not the whole .claude dir)
-      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json:ro
+      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json
       # Reports land here on the host after each run
       - ./reports:/home/auditor/reports
     stdin_open: true

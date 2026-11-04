@@ -30,6 +30,9 @@ pub enum BulwarkError {
     #[error("run budget exhausted: ${left:.2} left, below the minimum for a session")]
     BudgetExhausted { left: f64 },
 
+    #[error("Claude login failed, so the run stopped: {0}")]
+    ClaudeAuth(String),
+
     #[error("config error: {0}")]
     Config(String),
 

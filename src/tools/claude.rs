@@ -1,10 +1,11 @@
 use crate::budget::{self, Ledger};
-use crate::error::Result;
+use crate::error::{BulwarkError, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -91,6 +92,20 @@ pub fn parse_session_json(stdout: &str) -> Option<SessionResult> {
             .and_then(|s| s.as_str())
             .unwrap_or("unknown")
             .to_string(),
+    })
+}
+
+/// Set by the first session refused for a bad login; every later session would fail the same way.
+static AUTH_FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn auth_failed() -> bool {
+    AUTH_FAILED.load(Ordering::Relaxed)
+}
+
+fn auth_failure(events: &[&str]) -> bool {
+    events.iter().any(|e| {
+        serde_json::from_str::<serde_json::Value>(e)
+            .is_ok_and(|v| v.get("error").and_then(|x| x.as_str()) == Some("authentication_failed"))
     })
 }
 
@@ -226,6 +241,11 @@ impl ClaudeSession {
 
     async fn run_watched(&self, stall: Duration) -> Result<ClaudeOutput> {
         budget::check_cap(self.budget_usd)?;
+        if auth_failed() {
+            return Err(BulwarkError::ClaudeAuth(
+                "an earlier session was refused".into(),
+            ));
+        }
         let reservation = match &self.ledger {
             Some(l) => Some(l.reserve(&self.label, self.model.clone(), self.budget_usd)?),
             None => None,
@@ -310,14 +330,22 @@ impl ClaudeSession {
             Ending::TimedOut => TIMEOUT_EXIT,
             Ending::Stalled => STALLED_EXIT,
         };
+        let refused = auth_failure(&events);
         if let (Some(l), Some(i)) = (&self.ledger, reservation) {
             let outcome = match (&parsed, exit_code) {
+                _ if refused => "auth_failed",
                 (Some(r), _) => r.outcome.as_str(),
                 (None, STALLED_EXIT) => "stalled",
                 (None, TIMEOUT_EXIT) => "timed_out",
                 (None, _) => "no_result",
             };
             l.settle(i, cost_usd, parsed.as_ref().and_then(|r| r.turns), outcome)?;
+        }
+
+        if refused {
+            AUTH_FAILED.store(true, Ordering::Relaxed);
+            let why = parsed.map(|r| r.text).unwrap_or_default();
+            return Err(BulwarkError::ClaudeAuth(why));
         }
 
         Ok(ClaudeOutput {
@@ -510,6 +538,14 @@ pub(crate) fn looks_like_findings(arr: &[serde_json::Value]) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_expired_login_is_an_auth_failure() {
+        let refused = r#"{"type":"assistant","message":{"content":[]},"error":"authentication_failed","is_api_error_message":true}"#;
+        let fine = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"authentication_failed"}]}}"#;
+        assert!(auth_failure(&[fine, refused]));
+        assert!(!auth_failure(&[fine]));
+    }
     use super::*;
     use std::io::Write;
 

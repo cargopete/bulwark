@@ -42,9 +42,24 @@ echo "→ Audit dir: $AUDIT_DIR"
 echo ""
 
 # ── Inject host Claude credentials if mounted ─────────────────────────
-if [ -f "/home/auditor/.claude-host-creds/credentials.json" ]; then
-    cp /home/auditor/.claude-host-creds/credentials.json /home/auditor/.claude/.credentials.json
+HOST_CREDS=/home/auditor/.claude-host-creds/credentials.json
+if [ -f "$HOST_CREDS" ]; then
+    cp "$HOST_CREDS" /home/auditor/.claude/.credentials.json
     echo "✓  Claude credentials injected from host."
+    # A refresh rotates the token and voids the old one, so whichever side refreshed last wins.
+    # Written in place: the host file is a bind mount and cannot be renamed over.
+    (
+        LOCAL=/home/auditor/.claude/.credentials.json
+        while sleep 30; do
+            if cmp -s "$LOCAL" "$HOST_CREDS"; then
+                :
+            elif [ "$LOCAL" -nt "$HOST_CREDS" ]; then
+                cat "$LOCAL" > "$HOST_CREDS" 2>/dev/null
+            elif [ "$HOST_CREDS" -nt "$LOCAL" ]; then
+                cp "$HOST_CREDS" "$LOCAL"
+            fi
+        done
+    ) &
 fi
 
 # ── Check Claude Code auth ────────────────────────────────────────────
