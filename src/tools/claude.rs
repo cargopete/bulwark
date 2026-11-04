@@ -148,13 +148,13 @@ struct Attempt {
 }
 
 impl ClaudeSession {
-    fn command(&self, resume: Option<&str>, prompt: &str) -> Command {
+    fn command(&self, resume: Option<&str>) -> Command {
         let mut cmd = Command::new(&self.claude_bin);
         if let Some(id) = resume {
             cmd.arg("--resume").arg(id);
         }
+        // The prompt goes on stdin: Linux refuses any single argument over 128KB.
         cmd.arg("-p")
-            .arg(prompt)
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
             .arg("--verbose")
@@ -172,7 +172,7 @@ impl ClaudeSession {
             cmd.arg("--allowedTools").arg(tool);
         }
         cmd.current_dir(&self.working_dir)
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -187,7 +187,12 @@ impl ClaudeSession {
         resume: Option<&str>,
         prompt: &str,
     ) -> std::io::Result<Attempt> {
-        let mut child = self.command(resume, prompt).spawn()?;
+        let mut child = self.command(resume).spawn()?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let prompt = prompt.to_owned();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(prompt.as_bytes()).await;
+        });
         let mut stderr = child.stderr.take().expect("stderr is piped");
         let stderr_task = tokio::spawn(async move {
             let mut buf = Vec::new();
@@ -764,11 +769,29 @@ esac"#,
         let calls = std::fs::read_to_string(&args).unwrap();
         let calls: Vec<&str> = calls.lines().collect();
         assert_eq!(calls.len(), 2);
-        assert!(calls[0].starts_with("-p p "));
-        assert!(calls[1].starts_with(&format!("--resume abc-123 -p {STALL_RESUME_PROMPT}")));
+        assert!(calls[0].starts_with("-p --max-turns"));
+        assert!(calls[1].starts_with("--resume abc-123 -p --max-turns"));
         // The resumed attempt appends to the stream rather than replacing it.
         let live = std::fs::read_to_string(dir.path().join("s.log.live.jsonl")).unwrap();
         assert_eq!(live.lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_prompt_too_large_for_argv_reaches_the_cli() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let got = dir.path().join("stdin");
+        let mut s = fake_claude(
+            dir.path(),
+            &format!(
+                r#"cat > {}
+echo '{{"type":"result","subtype":"success","result":"ok"}}'"#,
+                got.display()
+            ),
+        );
+        s.prompt = "x".repeat(4 << 20);
+        let out = s.run_watched(Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(std::fs::metadata(&got).unwrap().len(), 4 << 20);
     }
 
     #[tokio::test]
