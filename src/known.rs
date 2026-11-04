@@ -180,6 +180,7 @@ pub async fn records(
         label: "known_extract".into(),
         budget_usd: share(allowance, EXTRACT_SHARE),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
     let _ = session.run_with_spinner("Extracting known issues...").await;
 
@@ -394,6 +395,7 @@ async fn adjudicate(
         label: "known_match".into(),
         budget_usd: share(allowance, MATCH_SHARE),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
     let _ = session
         .run_with_spinner("Matching against known issues...")

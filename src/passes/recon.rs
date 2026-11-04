@@ -886,6 +886,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
         label: "scv_scan".into(),
         budget_usd: ctx.allowance("recon").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session.run().await?;

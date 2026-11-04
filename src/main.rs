@@ -5,6 +5,7 @@
 mod budget;
 mod cli;
 mod config;
+mod coverage;
 mod dashboard;
 mod docker;
 mod error;

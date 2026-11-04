@@ -196,6 +196,7 @@ async fn classify(
         label: "scope_check".into(),
         budget_usd: cap,
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
     let _ = session.run_with_spinner("Scope classifier...").await;
 

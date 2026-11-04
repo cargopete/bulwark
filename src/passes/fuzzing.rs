@@ -304,6 +304,7 @@ async fn generate_invariant_tests(
         label: "fuzzing".into(),
         budget_usd: ctx.allowance("fuzzing").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session

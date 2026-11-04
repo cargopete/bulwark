@@ -35,6 +35,8 @@ pub struct ClaudeSession {
     /// Dollar cap passed as `--max-budget-usd`; `None` is unlimited.
     pub budget_usd: Option<f64>,
     pub ledger: Option<Arc<Ledger>>,
+    /// Session to continue with `--resume`; `prompt` is then the message sent to it.
+    pub resume: Option<String>,
 }
 
 /// Result of a completed Claude session.
@@ -42,6 +44,8 @@ pub struct ClaudeOutput {
     pub exit_code: i32,
     pub log_file: PathBuf,
     pub cost_usd: Option<f64>,
+    /// From the stream's `init` event; `None` if the session never started.
+    pub session_id: Option<String>,
 }
 
 /// The `type: "result"` record of `--output-format json`, which may be the whole
@@ -96,6 +100,23 @@ pub const MAX_STALL_RESTARTS: u32 = 2;
 pub const TIMEOUT_EXIT: i32 = 124;
 /// Exit code when every attempt stalled.
 pub const STALLED_EXIT: i32 = 125;
+const STALL_RESUME_PROMPT: &str =
+    "You were interrupted. Carry on with the task from where you left off.";
+
+/// The raw event stream a session appends to beside its log.
+pub fn live_log(log_file: &Path) -> PathBuf {
+    with_suffix(log_file, ".live.jsonl")
+}
+
+fn init_session_id(lines: &[String]) -> Option<String> {
+    lines.iter().find_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).ok()?;
+        if v.get("type")?.as_str()? != "system" || v.get("subtype")?.as_str()? != "init" {
+            return None;
+        }
+        Some(v.get("session_id")?.as_str()?.to_string())
+    })
+}
 
 enum Ending {
     Exited(i32),
@@ -110,10 +131,13 @@ struct Attempt {
 }
 
 impl ClaudeSession {
-    fn command(&self) -> Command {
+    fn command(&self, resume: Option<&str>, prompt: &str) -> Command {
         let mut cmd = Command::new(&self.claude_bin);
+        if let Some(id) = resume {
+            cmd.arg("--resume").arg(id);
+        }
         cmd.arg("-p")
-            .arg(&self.prompt)
+            .arg(prompt)
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
             .arg("--verbose")
@@ -143,8 +167,10 @@ impl ClaudeSession {
         stall: Duration,
         deadline: Option<Instant>,
         live: &Path,
+        resume: Option<&str>,
+        prompt: &str,
     ) -> std::io::Result<Attempt> {
-        let mut child = self.command().spawn()?;
+        let mut child = self.command(resume, prompt).spawn()?;
         let mut stderr = child.stderr.take().expect("stderr is piped");
         let stderr_task = tokio::spawn(async move {
             let mut buf = Vec::new();
@@ -205,12 +231,21 @@ impl ClaudeSession {
         let deadline = self
             .timeout_minutes
             .map(|m| Instant::now() + Duration::from_secs(u64::from(m) * 60));
-        let live = with_suffix(&self.log_file, ".live.jsonl");
-        let _ = std::fs::remove_file(&live);
+        let live = live_log(&self.log_file);
+        // A resumed session's earlier events stay, so the log covers the whole session.
+        if self.resume.is_none() {
+            let _ = std::fs::remove_file(&live);
+        }
 
         let mut stalls = 0;
+        let mut session_id = self.resume.clone();
+        let mut resume = self.resume.clone();
+        let mut prompt = self.prompt.as_str();
         let attempt = loop {
-            let attempt = match self.attempt(stall, deadline, &live).await {
+            let attempt = match self
+                .attempt(stall, deadline, &live, resume.as_deref(), prompt)
+                .await
+            {
                 Ok(a) => a,
                 Err(e) => {
                     if let (Some(l), Some(i)) = (&self.ledger, reservation) {
@@ -219,10 +254,22 @@ impl ClaudeSession {
                     return Err(e.into());
                 }
             };
+            if let Some(id) = init_session_id(&attempt.lines) {
+                session_id = Some(id);
+            }
             if matches!(attempt.ending, Ending::Stalled) && stalls < MAX_STALL_RESTARTS {
                 stalls += 1;
+                // Without an id the session never started, so there is nothing to resume.
+                let how = match &session_id {
+                    Some(id) => {
+                        resume = Some(id.clone());
+                        prompt = STALL_RESUME_PROMPT;
+                        "resuming"
+                    }
+                    None => "restarting",
+                };
                 eprintln!(
-                    "    {} {} silent for {}s, restarting ({stalls}/{MAX_STALL_RESTARTS})",
+                    "    {} {} silent for {}s, {how} ({stalls}/{MAX_STALL_RESTARTS})",
                     style("⚠").yellow(),
                     self.label,
                     stall.as_secs()
@@ -275,6 +322,7 @@ impl ClaudeSession {
             exit_code,
             log_file: self.log_file.clone(),
             cost_usd,
+            session_id,
         })
     }
 
@@ -622,6 +670,7 @@ some text
             label: "test".into(),
             budget_usd: None,
             ledger: None,
+            resume: None,
         }
     }
 
@@ -656,6 +705,34 @@ echo '{"type":"result","subtype":"success","result":"done","total_cost_usd":0.5,
         assert_eq!(out.exit_code, STALLED_EXIT);
         let attempts = std::fs::read_to_string(&count).unwrap().lines().count();
         assert_eq!(attempts as u32, MAX_STALL_RESTARTS + 1);
+    }
+
+    #[tokio::test]
+    async fn stall_restart_resumes_the_session_it_saw() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = dir.path().join("args");
+        let s = fake_claude(
+            dir.path(),
+            &format!(
+                r#"echo "$@" >> {}
+case "$1" in
+  --resume) echo '{{"type":"result","subtype":"success","result":"resumed"}}' ;;
+  *) echo '{{"type":"system","subtype":"init","session_id":"abc-123"}}'; exec sleep 30 ;;
+esac"#,
+                args.display()
+            ),
+        );
+        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.session_id.as_deref(), Some("abc-123"));
+        let calls = std::fs::read_to_string(&args).unwrap();
+        let calls: Vec<&str> = calls.lines().collect();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].starts_with("-p p "));
+        assert!(calls[1].starts_with(&format!("--resume abc-123 -p {STALL_RESUME_PROMPT}")));
+        // The resumed attempt appends to the stream rather than replacing it.
+        let live = std::fs::read_to_string(dir.path().join("s.log.live.jsonl")).unwrap();
+        assert_eq!(live.lines().count(), 2);
     }
 
     #[tokio::test]

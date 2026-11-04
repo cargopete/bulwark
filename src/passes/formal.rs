@@ -453,6 +453,7 @@ async fn generate_symbolic_tests(
         label: "formal".into(),
         budget_usd: ctx.allowance("formal").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session
