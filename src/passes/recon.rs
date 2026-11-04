@@ -289,6 +289,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         "failed_packages": failed_packages,
         "missing_core_contracts": missing_contracts,
         "slither_summary": serde_json::to_value(&slither_summary)?,
+        "slither_excluded_detectors": slither_combined.get("excluded_detectors").cloned().unwrap_or(json!({})),
+        "slither_triaged": triaged.len(),
         "entry_point_count": func_count,
         "storage_contracts": storage_count,
         "proxy_contracts": proxy_count,
@@ -425,8 +427,24 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
         eprintln!("    Analysing {pkg_name}...");
         let output_path = recon_dir.join(format!("slither-{pkg_name}-raw.json"));
 
-        let result =
-            slither::analyze(&slither_bin, &contracts_dir, &output_path, &triage_db).await?;
+        let config_path = recon_dir.join(format!("slither-{pkg_name}.config.json"));
+        let staged = slither::stage_config(&contracts_dir, &config_path)?;
+        if let Some(dropped) = staged.as_ref().filter(|d| !d.is_empty()) {
+            eprintln!(
+                "    Running detectors the target excludes: {}",
+                dropped.join(", ")
+            );
+            combined["excluded_detectors"][&pkg_name] = json!(dropped);
+        }
+
+        let result = slither::analyze(
+            &slither_bin,
+            &contracts_dir,
+            &output_path,
+            &triage_db,
+            staged.is_some().then_some(config_path.as_path()),
+        )
+        .await?;
         if let Some(json) = result.json {
             combined["packages"][&pkg_name] = json;
             eprintln!(

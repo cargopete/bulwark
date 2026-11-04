@@ -10,14 +10,61 @@ pub fn working_dir(contracts_dir: &Path) -> &Path {
 
 /// The target's own triage database would hide every result its team triaged,
 /// so Slither is pointed at `triage_db`, kept outside the target.
-pub fn analyze_args(contracts_dir: &Path, output_path: &Path, triage_db: &Path) -> Vec<String> {
-    vec![
+pub fn analyze_args(
+    contracts_dir: &Path,
+    output_path: &Path,
+    triage_db: &Path,
+    config: Option<&Path>,
+) -> Vec<String> {
+    let mut args = vec![
         contracts_dir.to_string_lossy().into_owned(),
         "--json".into(),
         output_path.to_string_lossy().into_owned(),
         "--triage-database".into(),
         triage_db.to_string_lossy().into_owned(),
-    ]
+    ];
+    if let Some(c) = config {
+        args.push("--config-file".into());
+        args.push(c.to_string_lossy().into_owned());
+    }
+    args
+}
+
+/// The target's config without `detectors_to_exclude`, and the detectors it excluded.
+pub fn without_exclusions(config: &Value) -> (Value, Vec<String>) {
+    let mut config = config.clone();
+    let dropped = match config
+        .as_object_mut()
+        .and_then(|o| o.remove("detectors_to_exclude"))
+    {
+        Some(Value::String(s)) => s
+            .split(',')
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|d| d.as_str().map(String::from))
+            .collect(),
+        _ => vec![],
+    };
+    (config, dropped)
+}
+
+/// Write the rewritten target config to `dest`. `None` when the target has no readable
+/// config, so Slither runs without one; otherwise the detectors that were excluded.
+pub fn stage_config(contracts_dir: &Path, dest: &Path) -> Result<Option<Vec<String>>> {
+    let _ = std::fs::remove_file(dest);
+    let Some(config) =
+        std::fs::read_to_string(working_dir(contracts_dir).join("slither.config.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    else {
+        return Ok(None);
+    };
+    let (config, dropped) = without_exclusions(&config);
+    std::fs::write(dest, serde_json::to_string_pretty(&config)?)?;
+    Ok(Some(dropped))
 }
 
 /// Run Slither on a contracts directory and return JSON results.
@@ -29,9 +76,10 @@ pub async fn analyze(
     contracts_dir: &Path,
     output_path: &Path,
     triage_db: &Path,
+    config: Option<&Path>,
 ) -> Result<SlitherResult> {
     let _ = std::fs::remove_file(triage_db);
-    let args = analyze_args(contracts_dir, output_path, triage_db);
+    let args = analyze_args(contracts_dir, output_path, triage_db, config);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
 
     let output = super::run_command(
@@ -202,6 +250,7 @@ mod tests {
             Path::new("/t/onyx/src"),
             Path::new("/ws/recon/slither-onyx-raw.json"),
             Path::new("/ws/recon/slither.db.json"),
+            None,
         );
         assert_eq!(
             args,
@@ -214,6 +263,68 @@ mod tests {
             ]
         );
         assert_eq!(working_dir(Path::new("/t/onyx/src")), Path::new("/t/onyx"));
+
+        let args = analyze_args(
+            Path::new("/t/onyx/src"),
+            Path::new("/ws/out.json"),
+            Path::new("/ws/db.json"),
+            Some(Path::new("/ws/recon/slither-onyx.config.json")),
+        );
+        assert_eq!(
+            &args[5..],
+            ["--config-file", "/ws/recon/slither-onyx.config.json"]
+        );
+    }
+
+    #[test]
+    fn config_rewrite_drops_only_detector_exclusions() {
+        let onyx = serde_json::json!({
+            "detectors_to_exclude": ["calls-loop", "naming-convention"],
+            "exclude_dependencies": true,
+            "filter_paths": "lib/|test/",
+            "solc_remaps": "@oz/=lib/oz/",
+        });
+        let (config, dropped) = without_exclusions(&onyx);
+        assert_eq!(dropped, vec!["calls-loop", "naming-convention"]);
+        assert_eq!(
+            config,
+            serde_json::json!({
+                "exclude_dependencies": true,
+                "filter_paths": "lib/|test/",
+                "solc_remaps": "@oz/=lib/oz/",
+            })
+        );
+
+        let (_, dropped) = without_exclusions(
+            &serde_json::json!({"detectors_to_exclude": "pragma, solc-version"}),
+        );
+        assert_eq!(dropped, vec!["pragma", "solc-version"]);
+        let (config, dropped) = without_exclusions(&serde_json::json!({"exclude_low": true}));
+        assert!(dropped.is_empty());
+        assert_eq!(config, serde_json::json!({"exclude_low": true}));
+    }
+
+    #[test]
+    fn config_is_staged_only_when_the_target_has_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let dest = dir.path().join("staged.json");
+
+        assert_eq!(stage_config(&src, &dest).unwrap(), None);
+        assert!(!dest.exists());
+
+        std::fs::write(
+            dir.path().join("slither.config.json"),
+            r#"{"detectors_to_exclude": ["pragma"], "exclude_dependencies": true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            stage_config(&src, &dest).unwrap(),
+            Some(vec!["pragma".to_string()])
+        );
+        let staged: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(staged, serde_json::json!({"exclude_dependencies": true}));
     }
 
     #[test]
