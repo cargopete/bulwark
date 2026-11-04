@@ -137,6 +137,16 @@ const SOURCE_EXTENSIONS: &[&str] = &[
     "sol", "vy", "rs", "move", "cairo", "fc", "func", "tact", "huff", "yul",
 ];
 
+/// Contract name from an address asset's description, e.g. "IssuanceHours (BSC)".
+fn description_name(description: &str) -> Option<String> {
+    let first = description
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    let ident = first.chars().next()?.is_ascii_alphabetic()
+        && first.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    ident.then(|| first.to_string())
+}
+
 /// Contract name from a source file path: the stem, if the extension is a contract language.
 fn contract_name(path: &str) -> Option<String> {
     let file = path.rsplit('/').next()?;
@@ -217,10 +227,17 @@ pub fn parse_scope_page(html: &str) -> Result<Imported> {
         .into_iter()
         .flatten()
         .filter(smart)
-        .filter_map(|a| a.get("url")?.as_str());
-    for url in urls {
+        .filter_map(|a| {
+            let description = a.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            Some((a.get("url")?.as_str()?, description))
+        });
+    for (url, description) in urls {
         let (name, address, chain_id) = if let Some((chain, addr)) = explorer_address(url) {
-            (String::new(), Some(addr), chain)
+            (
+                description_name(description).unwrap_or_default(),
+                Some(addr),
+                chain,
+            )
         } else if let Some(name) = github_blob(url).and_then(|b| contract_name(&b.path)) {
             (name, None, None)
         } else {
@@ -544,6 +561,20 @@ mod tests {
         assert_eq!(contract_name("README.md"), None);
         assert!(github_blob("https://github.com/org/repo/tree/main/src").is_none());
         assert!(github_blob("https://immunefi.com/").is_none());
+    }
+
+    #[test]
+    fn address_assets_are_named_from_their_description() {
+        assert_eq!(
+            description_name("IssuanceHours (BSC)").as_deref(),
+            Some("IssuanceHours")
+        );
+        assert_eq!(
+            description_name("PortfolioVault").as_deref(),
+            Some("PortfolioVault")
+        );
+        assert_eq!(description_name("ERC-20 token"), None);
+        assert_eq!(description_name(""), None);
     }
 
     #[test]
