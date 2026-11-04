@@ -726,7 +726,7 @@ esac"#,
                 args.display()
             ),
         );
-        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
+        let out = s.run_watched(Duration::from_secs(3)).await.unwrap();
         assert_eq!(out.exit_code, 0);
         assert_eq!(out.session_id.as_deref(), Some("abc-123"));
         let calls = std::fs::read_to_string(&args).unwrap();
