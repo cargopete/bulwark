@@ -49,6 +49,9 @@ pub enum Commands {
     /// Bounty program scope
     #[command(subcommand)]
     Program(ProgramCmd),
+
+    /// Serve a live web view of the run's health
+    Dashboard(DashboardArgs),
 }
 
 #[derive(Subcommand)]
@@ -105,6 +108,20 @@ pub struct ReportArgs {
     /// Output format
     #[arg(long, default_value = "markdown")]
     pub format: String,
+}
+
+#[derive(clap::Args)]
+pub struct DashboardArgs {
+    /// Address to listen on; use 0.0.0.0 inside the container
+    #[arg(long, default_value = "127.0.0.1")]
+    pub bind: String,
+
+    #[arg(long, default_value_t = 8484)]
+    pub port: u16,
+
+    /// Workspace directory to watch, instead of resolving it from bulwark.toml
+    #[arg(long)]
+    pub workspace: Option<PathBuf>,
 }
 
 #[derive(clap::Args)]

@@ -30,6 +30,10 @@ pub struct Config {
     #[serde(default)]
     pub models: BTreeMap<String, String>,
 
+    /// Logbook voice per stage, e.g. `red = "clarkson"`; `"none"` silences one.
+    #[serde(default)]
+    pub personas: BTreeMap<String, String>,
+
     #[serde(default)]
     pub budget: BudgetConfig,
 
@@ -40,7 +44,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetConfig {
-    /// Hard cap in USD on Claude spend for one run, pass 1 through 6.
+    /// Hard cap in USD on Claude spend for one run, pass 1 through 6. Unlimited by default.
     #[serde(default = "default_max_usd")]
     pub max_usd: f64,
 }
@@ -54,15 +58,14 @@ impl Default for BudgetConfig {
 }
 
 fn default_max_usd() -> f64 {
-    20.0
+    f64::INFINITY
 }
 
 pub const OPUS: &str = "claude-opus-5-5";
-pub const SONNET: &str = "claude-sonnet-5-5";
-pub const HAIKU: &str = "claude-haiku-5-5";
 
 /// Stages that run a Claude session, besides the Pass 2 agents themselves.
 pub const STAGES: &[&str] = &[
+    "hunter",
     "scv_scan",
     "variant_analysis",
     "scope_check",
@@ -75,21 +78,17 @@ pub const STAGES: &[&str] = &[
     "review",
 ];
 
-/// Opus where a wrong answer loses a real bug: discovery, the discard gate, PoCs, review.
-fn default_stage_model(stage: &str) -> &'static str {
-    match stage {
-        "red" | "gold" | "fp_check" | "known_match" | "poc" | "review" => OPUS,
-        "scope_check" => HAIKU,
-        _ => SONNET,
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TargetConfig {
     pub repo: String,
 
     #[serde(default = "default_branch")]
     pub branch: String,
+
+    /// Commit to audit instead of the branch head. Bounty scopes are pinned to a commit,
+    /// and code that only exists on the branch head may not be deployed.
+    #[serde(default)]
+    pub commit: Option<String>,
 
     pub scope: Vec<String>,
 
@@ -186,6 +185,23 @@ pub struct AgentsPassConfig {
     /// Max turns for each variant-analysis Claude session.
     #[serde(default = "default_variant_turns")]
     pub variant_max_turns: u32,
+
+    /// Slices of the codebase, each hunted by its own agent alongside `agents`.
+    #[serde(default)]
+    pub components: Vec<Component>,
+
+    /// Pass 2 sessions running at once.
+    #[serde(default = "default_max_parallel")]
+    pub max_parallel: usize,
+}
+
+/// Unknown keys are an error: in TOML, keys written after the last `[[components]]` belong to it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Component {
+    pub name: String,
+    /// Source paths relative to the target repo root.
+    pub files: Vec<String>,
 }
 
 impl Default for AgentsPassConfig {
@@ -197,6 +213,8 @@ impl Default for AgentsPassConfig {
             timeout_minutes: default_agent_timeout(),
             variant_analysis: true,
             variant_max_turns: default_variant_turns(),
+            components: Vec::new(),
+            max_parallel: default_max_parallel(),
         }
     }
 }
@@ -385,16 +403,19 @@ fn default_true() -> bool {
     true
 }
 fn default_max_turns() -> u32 {
-    80
+    400
 }
 fn default_agents() -> Vec<String> {
     vec!["red".into(), "blue".into(), "gold".into()]
 }
+fn default_max_parallel() -> usize {
+    4
+}
 fn default_agent_timeout() -> u64 {
-    60
+    240
 }
 fn default_poc_turns() -> u32 {
-    30
+    100
 }
 fn default_poc_retries() -> u32 {
     2
@@ -412,7 +433,7 @@ fn default_echidna_limit() -> u64 {
     500_000
 }
 fn default_fuzz_turns() -> u32 {
-    40
+    100
 }
 fn default_solver_timeout() -> u64 {
     300
@@ -421,10 +442,10 @@ fn default_loop_bound() -> u32 {
     5
 }
 fn default_formal_turns() -> u32 {
-    30
+    80
 }
 fn default_review_turns() -> u32 {
-    60
+    150
 }
 fn default_prompts_dir() -> String {
     "prompts".into()
@@ -433,13 +454,13 @@ fn default_schemas_dir() -> String {
     "schemas".into()
 }
 fn default_scv_scan_turns() -> u32 {
-    20
+    60
 }
 fn default_variant_turns() -> u32 {
-    15
+    50
 }
 fn default_fp_check_turns() -> u32 {
-    15
+    40
 }
 
 impl Config {
@@ -482,6 +503,35 @@ impl Config {
         )))
     }
 
+    /// Display name for a persona key.
+    pub fn persona_name(key: &str) -> &str {
+        match key {
+            "clarkson" => "Jeremy Clarkson",
+            "may" => "James May",
+            "foghorn" => "Foghorn Leghorn",
+            "juliette" => "Juliette Nichols",
+            "wilman" => "Andy Wilman",
+            other => other,
+        }
+    }
+
+    /// Persona key for a stage. Stages that read a verdict from the session's final text
+    /// (fp_check, known_*, scope_check) have no default, so narration cannot flip a result.
+    pub fn persona_for(&self, stage: &str) -> Option<String> {
+        let key = match self.personas.get(stage) {
+            Some(k) => k.as_str(),
+            None => match stage {
+                "red" | "scv_scan" => "clarkson",
+                "blue" | "fuzzing" | "formal" | "variant_analysis" => "may",
+                "gold" => "foghorn",
+                "hunter" | "poc" => "juliette",
+                "review" => "wilman",
+                _ => return None,
+            },
+        };
+        (key != "none").then(|| key.to_string())
+    }
+
     /// Model for a stage: `[models]`, then the pass's own override, then the legacy
     /// top-level `model`, then the built-in default.
     pub fn model_for(&self, stage: &str) -> String {
@@ -495,7 +545,7 @@ impl Config {
             .or(pass_override)
             .or(self.model.as_ref())
             .cloned()
-            .unwrap_or_else(|| default_stage_model(stage).to_string())
+            .unwrap_or_else(|| OPUS.to_string())
     }
 
     /// Resolve tool path: use configured override, or fall back to `which`.
@@ -590,6 +640,30 @@ core_contracts = ["Test"]
     }
 
     #[test]
+    fn components_parse() {
+        let c: Config = toml::from_str(&format!(
+            "{MINIMAL_TOML}\n[[passes.agents.components]]\nname = \"queues\"\nfiles = [\"src/Q.sol\"]\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            c.passes.agents.components,
+            vec![Component {
+                name: "queues".into(),
+                files: vec!["src/Q.sol".into()]
+            }]
+        );
+        assert_eq!(c.passes.agents.max_parallel, 4);
+    }
+
+    #[test]
+    fn keys_after_a_component_are_rejected() {
+        let r: std::result::Result<Config, _> = toml::from_str(&format!(
+            "{MINIMAL_TOML}\n[[passes.agents.components]]\nname = \"q\"\nfiles = []\ntimeout_minutes = 5\n"
+        ));
+        assert!(r.is_err());
+    }
+
+    #[test]
     fn default_agents_list_is_red_blue_gold() {
         let config: Config = toml::from_str(MINIMAL_TOML).expect("parse");
 
@@ -645,23 +719,26 @@ core_contracts = ["Test"]
     fn pass_config_default_values_are_correct() {
         let config: Config = toml::from_str(MINIMAL_TOML).expect("parse");
 
-        assert_eq!(config.passes.agents.max_turns, 80);
-        assert_eq!(config.passes.agents.timeout_minutes, 60);
-        assert_eq!(config.passes.poc.max_turns, 30);
+        assert!(config.budget.max_usd.is_infinite());
+        assert_eq!(config.passes.agents.max_turns, 400);
+        assert_eq!(config.passes.agents.timeout_minutes, 240);
+        assert_eq!(config.passes.poc.max_turns, 100);
         assert_eq!(config.passes.poc.max_retries, 2);
         assert_eq!(config.passes.fuzzing.fuzz_runs, 10_000);
         assert_eq!(config.passes.fuzzing.invariant_depth, 50);
         assert_eq!(config.passes.formal.solver_timeout, 300);
         assert_eq!(config.passes.formal.loop_bound, 5);
-        assert_eq!(config.passes.review.max_turns, 60);
+        assert_eq!(config.passes.fuzzing.max_turns, 100);
+        assert_eq!(config.passes.formal.max_turns, 80);
+        assert_eq!(config.passes.review.max_turns, 150);
 
         // Phase 1 skill integration defaults
         assert!(config.passes.recon.scv_scan);
-        assert_eq!(config.passes.recon.scv_scan_max_turns, 20);
+        assert_eq!(config.passes.recon.scv_scan_max_turns, 60);
         assert!(config.passes.agents.variant_analysis);
-        assert_eq!(config.passes.agents.variant_max_turns, 15);
+        assert_eq!(config.passes.agents.variant_max_turns, 50);
         assert!(config.passes.poc.fp_check);
-        assert_eq!(config.passes.poc.fp_check_max_turns, 15);
+        assert_eq!(config.passes.poc.fp_check_max_turns, 40);
     }
 
     fn with(extra: &str) -> Result<Config> {
@@ -670,13 +747,36 @@ core_contracts = ["Test"]
     }
 
     #[test]
-    fn stage_defaults_put_opus_on_discovery_and_proof() {
+    fn personas_default_override_and_silence() {
         let c = with("").unwrap();
-        for s in ["red", "gold", "fp_check", "poc", "review"] {
-            assert_eq!(c.model_for(s), OPUS, "{s}");
+        assert_eq!(c.persona_for("red").as_deref(), Some("clarkson"));
+        assert_eq!(c.persona_for("hunter").as_deref(), Some("juliette"));
+        assert_eq!(c.persona_for("fp_check"), None);
+        let c: Config = toml::from_str(&format!(
+            "{MINIMAL_TOML}\n[personas]\nred = \"may\"\nreview = \"none\"\n"
+        ))
+        .unwrap();
+        assert_eq!(c.persona_for("red").as_deref(), Some("may"));
+        assert_eq!(c.persona_for("review"), None);
+    }
+
+    #[test]
+    fn every_default_persona_has_a_voice_file() {
+        let c = with("").unwrap();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("prompts/personas");
+        assert!(dir.join("_logbook.md").exists());
+        for s in ["red", "blue", "gold"].iter().chain(STAGES) {
+            if let Some(k) = c.persona_for(s) {
+                assert!(dir.join(format!("{k}.md")).exists(), "{s} -> {k}");
+            }
         }
-        for s in ["blue", "scv_scan", "variant_analysis", "fuzzing", "formal"] {
-            assert_eq!(c.model_for(s), SONNET, "{s}");
+    }
+
+    #[test]
+    fn every_stage_defaults_to_opus() {
+        let c = with("").unwrap();
+        for s in ["red", "gold", "blue"].iter().chain(STAGES) {
+            assert_eq!(c.model_for(s), OPUS, "{s}");
         }
     }
 

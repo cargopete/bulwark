@@ -105,7 +105,7 @@ Every finding must earn a validated proof-of-concept or it is discarded.
 
 ### Pass 4: Fuzzing Campaign
 
-Claude (Sonnet) generates Foundry invariant tests from PROPERTIES.md. No bash access — Claude
+Claude generates Foundry invariant tests from PROPERTIES.md. No bash access — Claude
 writes files only, the pipeline handles compilation. Generated files are sanitised (unicode
 quotes replaced with ASCII) before compilation to prevent Solidity parse errors.
 
@@ -117,7 +117,7 @@ Medusa and Echidna integration is wired up but not yet installed in the containe
 
 ### Pass 5: Formal Verification
 
-Claude (Sonnet) generates symbolic tests for critical properties. Tests run in an isolated
+Claude generates symbolic tests for critical properties. Tests run in an isolated
 directory (import-free pure arithmetic contracts) so Halmos doesn't fight the full project.
 
 Halmos runs bounded model checking (`--loop 5`, `--solver-timeout 300s`) per property:
@@ -150,9 +150,7 @@ arithmetic model — the violation is at the protocol interaction level, not the
 
 ## Model Configuration
 
-Each stage picks its own model. Opus 5.5 runs where a wrong answer loses a real bug
-(RED, GOLD, fp-check, PoC generation, review); Sonnet 5.5 runs the rest. Override any
-stage in a `[models]` table:
+Every stage runs on Opus 5.5 by default. Override any stage in a `[models]` table:
 
 ```toml
 [models]

@@ -16,6 +16,8 @@ if [ -f "/home/auditor/project/bulwark.toml" ]; then
     AUDIT_TARGET="${AUDIT_TARGET:-$AUDIT_TARGET_FROM_CONFIG}"
     AUDIT_BRANCH_FROM_CONFIG=$(grep 'branch = ' "$PROJECT_CONFIG" | head -1 | sed 's/.*branch = "\(.*\)"/\1/' || true)
     AUDIT_BRANCH="${AUDIT_BRANCH:-${AUDIT_BRANCH_FROM_CONFIG:-main}}"
+    AUDIT_COMMIT_FROM_CONFIG=$(grep '^commit = ' "$PROJECT_CONFIG" | head -1 | sed 's/.*commit = "\(.*\)"/\1/' || true)
+    AUDIT_COMMIT="${AUDIT_COMMIT:-$AUDIT_COMMIT_FROM_CONFIG}"
 else
     echo "⚠  No project mounted at /home/auditor/project — using built-in Graph Protocol config."
     PROJECT_CONFIG="/home/auditor/bulwark.toml"
@@ -35,7 +37,7 @@ echo "║  Multi-pass · Multi-agent · PoC-gated              ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "→ Config:    $PROJECT_CONFIG"
-echo "→ Target:    $AUDIT_TARGET ($AUDIT_BRANCH)"
+echo "→ Target:    $AUDIT_TARGET ($AUDIT_BRANCH${AUDIT_COMMIT:+ @ $AUDIT_COMMIT})"
 echo "→ Audit dir: $AUDIT_DIR"
 echo ""
 
@@ -72,6 +74,17 @@ else
 fi
 
 cd "$AUDIT_DIR"
+
+if [ -n "${AUDIT_COMMIT:-}" ]; then
+    # A pin may sit deeper than the shallow clone reaches.
+    git cat-file -e "${AUDIT_COMMIT}^{commit}" 2>/dev/null || git fetch --unshallow origin 2>/dev/null || git fetch origin
+    git -c advice.detachedHead=false checkout --force "$AUDIT_COMMIT"
+fi
+
+if [ -f ".gitmodules" ]; then
+    echo "→ Initialising submodules..."
+    git submodule update --init --recursive
+fi
 
 # ── Install dependencies ────────────────────────────────────────────
 echo "→ Installing contract dependencies..."
@@ -129,7 +142,12 @@ echo "→ Compiling contracts..."
 # FOUNDRY_EVM_VERSION=cancun ensures Vyper 0.3.x contracts compile — Vyper does not support
 # the 'prague' EVM target that newer Foundry versions default to. Cancun is current mainnet.
 if [ -f "foundry.toml" ] || [ -f "forge.config.toml" ]; then
-    FOUNDRY_EVM_VERSION=cancun forge build 2>/dev/null && echo "  ✓ Compiled" || echo "  ✗ Root build failed (Pass 1 will retry per-package)"
+    if build_out=$(FOUNDRY_EVM_VERSION=cancun forge build 2>&1); then
+        echo "  ✓ Compiled"
+    else
+        echo "$build_out" | tail -20
+        echo "  ✗ Root build failed (Pass 1 will retry per-package)"
+    fi
 elif [ -d "packages" ]; then
     for pkg in packages/*/; do
         [ -f "${pkg}foundry.toml" ] || continue

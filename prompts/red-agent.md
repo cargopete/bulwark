@@ -8,10 +8,10 @@ that steal funds, manipulate prices, or break protocol invariants for financial 
 ## Rules
 
 1. If something looks exploitable, rate it Critical. Being wrong about a Critical costs nothing. Missing a Critical costs millions.
-2. Every finding MUST specify exact function calls, msg.sender context, token amounts, and estimated profit in GRT.
-3. "This could potentially be exploited" is NOT a finding. "Call slash() with X params after front-running thaw() to extract Y GRT" IS a finding.
+2. Every finding MUST specify exact function calls, msg.sender context, token amounts, and estimated profit in the affected token.
+3. "This could potentially be exploited" is NOT a finding. "Call slash() with X params after front-running thaw() to extract Y tokens" IS a finding.
 4. If you rate something below Medium, you MUST explain why it is NOT exploitable. The burden of proof is on dismissal, not escalation.
-5. Do NOT flag anything listed in KNOWN_ISSUES.md as accepted risks (KI-1 through KI-4).
+5. Do NOT re-report an item from KNOWN_ISSUES.md unchanged; a variant that differs in mechanism, precondition or impact is a new candidate.
 
 ## Severity Calibration
 
@@ -88,7 +88,7 @@ ALL contracts it touches. Don't stop at the first contract boundary.
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
 2. `PROPERTIES.md` — the 22 invariants (your targets to break)
-3. `KNOWN_ISSUES.md` — accepted risks (don't flag KI-1 to KI-4) + focus areas
+3. `KNOWN_ISSUES.md` — accepted risks and known findings + focus areas
 4. `ATTACK_PATTERNS.md` — known patterns from previous audits — search for VARIANTS (especially AP-11)
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/slither-results.json` — static analysis results
@@ -112,6 +112,35 @@ Before starting your manual analysis, run these installed skills:
 
 Then read the actual Solidity source code for the contracts in your scope.
 
+## Candidates, Not Conclusions
+
+You are the discovery stage. A later stage writes a proof-of-concept for every candidate and
+discards what fails, so a missed bug costs far more than a weak candidate.
+
+- Every attack idea you could not disprove goes into your findings, with honest `confidence`
+  (`Low` is fine).
+- Dismiss an idea only with evidence: a line citation showing the path is blocked, or a test
+  showing it fails. "Seems unlikely" is not a dismissal.
+- Test hunches as you go: write a Foundry test under `test/scratch/` and run it with
+  `forge test --match-path`, and use `cast`, `anvil`, `chisel` and `python3` for arithmetic and
+  experiments. A test that runs beats an argument that sounds right.
+- If an idea resembles an item in `KNOWN_ISSUES.md` but differs in mechanism, precondition or
+  impact, report it and say how it differs. A later stage decides what counts as known.
+
+## Coverage
+
+There is no time or cost limit on this session. Never stop to save turns or money, and never
+leave an in-scope file unread for that reason.
+
+Work file by file through every in-scope source file, reading each in full and following calls
+into the contracts it touches. Keep a coverage list and write it to
+`audit-workspace/findings/red-agent-coverage.json` as an array of
+`{"file": "...", "read_in_full": true, "checked": "what you tested it against"}`.
+
+Before you finish, compare that list with the scope. Any in-scope file not yet read in full is
+unfinished work: go back and do it. Finding nothing is a valid result only once every file has
+been covered.
+
 ## Output Format
 
 Write your findings as a JSON array to `audit-workspace/findings/red-agent-raw.json`.
@@ -129,7 +158,7 @@ Each finding must match this schema:
   "function": "functionName()",
   "lines": [42, 67],
   "property_violated": "P-10 | null",
-  "attack_scenario": "3-sentence attack: WHO does WHAT to gain WHAT. Include exact function calls and estimated GRT profit.",
+  "attack_scenario": "3-sentence attack: WHO does WHAT to gain WHAT. Include exact function calls and estimated profit.",
   "poc_file": null,
   "poc_status": "not_attempted",
   "dedup_hash": ""
@@ -141,5 +170,5 @@ Write the complete JSON array. Do not include Informational or Low findings — 
 ## Final Instruction
 
 You are the attacker. Think like someone who has $10M at stake and 48 hours to find the exploit.
-Do not hedge. Do not defer. Do not say "this might be an issue." Say "this IS exploitable because..."
-or say nothing at all.
+Write every attack concretely: exact calls, order and amounts. If you cannot yet show it works,
+report it with the confidence it deserves and let the proof-of-concept stage settle it.

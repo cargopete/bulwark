@@ -5,6 +5,7 @@
 mod budget;
 mod cli;
 mod config;
+mod dashboard;
 mod docker;
 mod error;
 mod findings;
@@ -44,6 +45,24 @@ async fn main() -> anyhow::Result<()> {
     // init creates bulwark.toml, so it cannot wait for one to load.
     if let Commands::Init(args) = cli.command {
         return cmd_init(args);
+    }
+    if let Commands::Dashboard(args) = &cli.command {
+        if let Some(root) = &args.workspace {
+            // A config, when one is at hand, tells the dashboard which files each agent owes.
+            let scope = [
+                Some(cli.config.clone()),
+                std::env::var("BULWARK_ROOT")
+                    .ok()
+                    .map(|r| PathBuf::from(r).join("bulwark.toml")),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|p| p.exists())
+            .and_then(|p| Config::load(&p).ok())
+            .map(|c| dashboard::status::Scope::from_config(&c))
+            .unwrap_or_default();
+            return dashboard::serve(Workspace::new(root, ""), scope, &args.bind, args.port).await;
+        }
     }
 
     // Resolve config: CWD first, then $BULWARK_ROOT fallback
@@ -100,6 +119,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
         Commands::Init(_) => unreachable!("handled before the config loads"),
+        Commands::Dashboard(args) => {
+            let ws = Workspace::new(&audit_dir, &config.workspace.path);
+            let scope = dashboard::status::Scope::from_config(&config);
+            dashboard::serve(ws, scope, &args.bind, args.port).await?
+        }
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
         Commands::Program(cli::ProgramCmd::Import { url }) => {
@@ -471,24 +495,16 @@ math_sensitive = [
     # List contracts with complex arithmetic for extra scrutiny
 ]
 
-# Claude model per stage; these are the defaults. Pass 2 agents are keyed by name.
+# Every stage runs on Opus by default; override any stage by name. Pass 2 agents are keyed by name.
 # A table, so it must sit after every top-level key.
 # [models]
-# red              = "claude-opus-5-5"
-# gold             = "claude-opus-5-5"
-# blue             = "claude-sonnet-5-5"
-# scv_scan         = "claude-sonnet-5-5"
-# variant_analysis = "claude-sonnet-5-5"
-# fp_check         = "claude-opus-5-5"
-# poc              = "claude-opus-5-5"
-# fuzzing          = "claude-sonnet-5-5"
-# formal           = "claude-sonnet-5-5"
-# review           = "claude-opus-5-5"
+# blue     = "claude-sonnet-5-5"
+# fuzzing  = "claude-sonnet-5-5"
 
 [budget]
-# Hard cap on Claude spend for one run. Each pass gets its share of what is left;
-# PoCs are attempted highest severity first. Spend is recorded in <workspace>/cost.json.
-max_usd = 20.0
+# No cap by default, which suits a subscription. With an API key, set a hard cap: each pass
+# gets its share of what is left, PoCs go highest severity first, spend lands in cost.json.
+# max_usd = 50.0
 
 [workspace]
 path = "audit-workspace"

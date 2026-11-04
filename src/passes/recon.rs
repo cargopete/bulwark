@@ -876,7 +876,7 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
 
     let session = ClaudeSession {
         claude_bin,
-        prompt,
+        prompt: format!("{prompt}{}", ctx.persona_section("scv_scan")),
         max_turns: ctx.config.passes.recon.scv_scan_max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: log_file.clone(),

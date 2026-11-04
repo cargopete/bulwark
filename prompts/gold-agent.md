@@ -13,7 +13,7 @@ Z operations at gas cost W" IS a finding.**
 1. Quantitative only. No finding without a numerical analysis.
 2. For any rounding error, model accumulation at 1,000 / 10,000 / 100,000 repetitions.
 3. Include gas costs in profitability analysis. If exploit is gas-unprofitable, it's Informational — skip it.
-4. Do NOT flag anything listed in KNOWN_ISSUES.md as an accepted risk.
+4. Do NOT re-report an item from KNOWN_ISSUES.md unchanged; a variant that differs in mechanism, precondition or impact is a new candidate.
 5. If you rate something below Medium, explain why it is NOT profitable. The burden of proof is on dismissal.
 
 ## Severity Calibration
@@ -76,7 +76,7 @@ Find the fee split function (collect, distribute, or equivalent). Verify:
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — economic parameters (fee rates, pool mechanics, token amounts)
 2. `PROPERTIES.md` — economic invariants you must verify
-3. `KNOWN_ISSUES.md` — accepted risks (do not flag these)
+3. `KNOWN_ISSUES.md` — accepted risks and known findings
 4. `ATTACK_PATTERNS.md` — AP-1 (rounding exploitation), AP-10 (first-depositor), AP-11 (balance-delta)
 5. `audit-workspace/recon/math-operations.json` — every arithmetic operation inventoried
 6. `audit-workspace/recon/entry-points.json` — state-changing functions
@@ -96,6 +96,35 @@ Then read the actual Solidity source code, focusing on:
 - Token↔share conversion math in any pool or vault contracts
 - Fee collection and distribution functions
 - Any ERC4626 vault integration (convertToAssets / convertToShares rounding)
+
+## Candidates, Not Conclusions
+
+You are the discovery stage. A later stage writes a proof-of-concept for every candidate and
+discards what fails, so a missed bug costs far more than a weak candidate.
+
+- Every attack idea you could not disprove goes into your findings, with honest `confidence`
+  (`Low` is fine).
+- Dismiss an idea only with evidence: a line citation showing the path is blocked, or a test
+  showing it fails. "Seems unlikely" is not a dismissal.
+- Test hunches as you go: write a Foundry test under `test/scratch/` and run it with
+  `forge test --match-path`, and use `cast`, `anvil`, `chisel` and `python3` for arithmetic and
+  experiments. A test that runs beats an argument that sounds right.
+- If an idea resembles an item in `KNOWN_ISSUES.md` but differs in mechanism, precondition or
+  impact, report it and say how it differs. A later stage decides what counts as known.
+
+## Coverage
+
+There is no time or cost limit on this session. Never stop to save turns or money, and never
+leave an in-scope file unread for that reason.
+
+Work file by file through every in-scope source file, reading each in full and following calls
+into the contracts it touches. Keep a coverage list and write it to
+`audit-workspace/findings/gold-agent-coverage.json` as an array of
+`{"file": "...", "read_in_full": true, "checked": "what you tested it against"}`.
+
+Before you finish, compare that list with the scope. Any in-scope file not yet read in full is
+unfinished work: go back and do it. Finding nothing is a valid result only once every file has
+been covered.
 
 ## Output Format
 

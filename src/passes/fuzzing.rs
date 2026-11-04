@@ -286,7 +286,7 @@ async fn generate_invariant_tests(
 
     let session = ClaudeSession {
         claude_bin,
-        prompt,
+        prompt: format!("{prompt}{}", ctx.persona_section("fuzzing")),
         max_turns: ctx.config.passes.fuzzing.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("invariant-generation.log"),

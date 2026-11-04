@@ -84,8 +84,11 @@ impl std::fmt::Display for Severity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Confidence {
+    #[serde(alias = "low")]
     Low,
+    #[serde(alias = "medium")]
     Medium,
+    #[serde(alias = "high")]
     High,
 }
 
@@ -130,6 +133,12 @@ fn default_poc_status() -> PocStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confidence_accepts_lowercase() {
+        let c: Confidence = serde_json::from_str("\"low\"").unwrap();
+        assert_eq!(c, Confidence::Low);
+    }
 
     #[test]
     fn severity_ordering_informational_through_critical() {

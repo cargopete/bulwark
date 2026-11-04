@@ -340,7 +340,7 @@ async fn generate_and_validate_poc(
 
         let session = ClaudeSession {
             claude_bin: run.claude_bin.to_path_buf(),
-            prompt,
+            prompt: format!("{prompt}{}", ctx.persona_section("poc")),
             max_turns: run.max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file: log_file.to_path_buf(),

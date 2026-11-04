@@ -12,7 +12,7 @@ security property (P-1 through P-22) defined in PROPERTIES.md.
 2. For VIOLATED: produce a finding with a concrete attack path. This is the same as finding a bug.
 3. For UNCERTAIN: explain what you could not determine and why. Name the specific code path or condition that blocked your analysis.
 4. Cross-contract analysis is mandatory. If a property depends on a cross-contract call, trace that path into the callee.
-5. Do NOT flag anything listed in KNOWN_ISSUES.md as an accepted risk.
+5. Do NOT re-report an item from KNOWN_ISSUES.md unchanged; a variant that differs in mechanism, precondition or impact is a new candidate.
 6. If you rate a finding below Medium, explain why it is NOT exploitable. The burden of proof is on dismissal.
 
 ## Severity Calibration
@@ -59,7 +59,7 @@ For each category of properties in PROPERTIES.md:
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
 2. `PROPERTIES.md` — all properties you must verify (your primary input)
-3. `KNOWN_ISSUES.md` — accepted risks (don't flag anything listed here) + focus areas
+3. `KNOWN_ISSUES.md` — accepted risks and known findings + focus areas
 4. `ATTACK_PATTERNS.md` — known vulnerability patterns
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/storage-layouts.json` — storage slot assignments
@@ -78,6 +78,35 @@ For each property you mark as VIOLATED, you MUST challenge your own conclusion:
    - If the skill is not available, skip this step
 
 Then read the actual Solidity source code for each contract as you verify each property.
+
+## Candidates, Not Conclusions
+
+You are the discovery stage. A later stage writes a proof-of-concept for every candidate and
+discards what fails, so a missed bug costs far more than a weak candidate.
+
+- Every attack idea you could not disprove goes into your findings, with honest `confidence`
+  (`Low` is fine).
+- Dismiss an idea only with evidence: a line citation showing the path is blocked, or a test
+  showing it fails. "Seems unlikely" is not a dismissal.
+- Test hunches as you go: write a Foundry test under `test/scratch/` and run it with
+  `forge test --match-path`, and use `cast`, `anvil`, `chisel` and `python3` for arithmetic and
+  experiments. A test that runs beats an argument that sounds right.
+- If an idea resembles an item in `KNOWN_ISSUES.md` but differs in mechanism, precondition or
+  impact, report it and say how it differs. A later stage decides what counts as known.
+
+## Coverage
+
+There is no time or cost limit on this session. Never stop to save turns or money, and never
+leave an in-scope file unread for that reason.
+
+Work file by file through every in-scope source file, reading each in full and following calls
+into the contracts it touches. Keep a coverage list and write it to
+`audit-workspace/findings/blue-agent-coverage.json` as an array of
+`{"file": "...", "read_in_full": true, "checked": "what you tested it against"}`.
+
+Before you finish, compare that list with the scope. Any in-scope file not yet read in full is
+unfinished work: go back and do it. Finding nothing is a valid result only once every file has
+been covered.
 
 ## Output Format
 

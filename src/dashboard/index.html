@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en" data-palette="brick">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bulwark run</title>
+<style>
+:root {
+  --bg: #171614; --bg-elev: #201f1c; --bg-code: #1b1a17; --bg-inset: #262420;
+  --border: rgba(255,255,255,0.09); --border-hi: rgba(255,255,255,0.16);
+  --text: #ece9e3; --text-muted: #9c978c; --text-faint: #6e6a61;
+  --accent: #d0704f; --accent-ink: #f2cbbb;
+  --bad: #e36b6b; --bad-ink: #f5c4c4;
+  --ok: #86b592; --warn: #cdb06a;
+  --pale-accent-bg: rgba(208,112,79,0.12); --pale-bad-bg: rgba(227,107,107,0.12);
+  --pale-warn-bg: rgba(205,176,106,0.12); --pale-green-bg: rgba(134,181,146,0.12);
+  --radius: 10px; --radius-sm: 6px;
+  --sans: 'Space Grotesk', ui-sans-serif, system-ui, 'Helvetica Neue', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { font-size: 112.5%; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+  font-size: 0.875rem; line-height: 1.6; letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+::selection { background: var(--pale-accent-bg); color: var(--text); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mono, code { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+.top {
+  position: sticky; top: 0; z-index: 10; height: 4.5rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding-inline: 1.5rem; background: rgba(23,22,20,0.8);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; flex-direction: column; line-height: 1.1; }
+.brand b { font-size: 1.125rem; font-weight: 600; letter-spacing: -0.06em; }
+.brand span, .kicker, .label {
+  font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.12em;
+  font-size: 0.625rem; color: var(--accent);
+}
+.fresh { font-family: var(--mono); font-size: 0.6875rem; color: var(--text-muted); text-align: right; }
+.fresh .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  margin-right: 0.4rem; vertical-align: middle; animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+main { max-width: 90rem; margin-inline: auto; padding: 1.5rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+main > *, .two > * { min-width: 0; }
+section > .kicker { margin: 0 0 0.6rem; }
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
+.card:hover { border-color: var(--border-hi); }
+.pad { padding: 1rem; }
+.muted { color: var(--text-muted); }
+
+.banner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
+.verdict { padding: 1.25rem; border-right: 1px solid var(--border); }
+.verdict h1 { margin: 0.2rem 0 0.4rem; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1.1; }
+.verdict ul { margin: 0; padding-left: 1.1rem; color: var(--text-muted); font-size: 0.75rem; }
+.verdict li { margin: 0.15rem 0; overflow-wrap: anywhere; }
+.h-green h1 { color: var(--ok); } .h-amber h1 { color: var(--warn); } .h-red h1 { color: var(--bad); }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0; overflow: hidden; }
+.stat { background: var(--bg-elev); padding: 0.9rem 1rem; }
+.stat .v { display: block; font-size: 1.5rem; font-weight: 500; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.stat .u { font-family: var(--mono); font-size: 0.625rem; color: var(--accent); margin-left: 0.25rem; text-transform: uppercase; }
+
+.timeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pass { background: var(--bg-elev); padding: 0.8rem 0.9rem; min-width: 0; }
+.pass .n { font-family: var(--mono); font-size: 0.625rem; color: var(--accent); letter-spacing: 0.12em; }
+.pass .name { display: block; font-weight: 500; margin: 0.15rem 0 0.35rem; }
+.pass .meta { font-family: var(--mono); font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.35rem; }
+.pass.running { box-shadow: inset 0 2px 0 var(--accent); }
+
+.badge { display: inline-block; font-family: var(--mono); font-size: 0.6875rem; line-height: 1.5;
+  padding: 0 0.5rem; border-radius: 9999px; background: var(--bg-inset); color: var(--text-muted); white-space: nowrap; }
+.b-accent { background: var(--pale-accent-bg); color: var(--accent-ink); }
+.b-ok { background: var(--pale-green-bg); color: var(--ok); }
+.b-warn { background: var(--pale-warn-bg); color: var(--warn); }
+.b-bad { background: var(--pale-bad-bg); color: var(--bad-ink); }
+
+.hdot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; vertical-align: baseline; }
+.d-green { background: var(--ok); } .d-amber { background: var(--warn); } .d-red { background: var(--bad); }
+
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+th { text-align: left; font-weight: 400; font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap;
+  padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
+td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.sess { font-family: var(--mono); font-size: 0.75rem; white-space: nowrap; }
+td.last { font-family: var(--mono); font-size: 0.6875rem; color: var(--text-muted); max-width: 26rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.why { font-size: 0.75rem; color: var(--text-muted); min-width: 12rem; }
+td.why.red { color: var(--bad); }
+.pin { position: sticky; left: 0; background: var(--bg-elev); }
+.empty { padding: 1rem; color: var(--text-muted); font-size: 0.75rem; }
+.fail { border-color: var(--bad); background: var(--pale-bad-bg); color: var(--bad-ink); padding: 0.8rem 1rem; font-size: 0.8125rem; }
+.fail ul { margin: 0.3rem 0 0; padding-left: 1.1rem; font-family: var(--mono); font-size: 0.6875rem; overflow-wrap: anywhere; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1.5rem; align-items: start; }
+
+tr.open { cursor: pointer; }
+tr.open:hover td, tr.open:focus-visible td { background: var(--bg-inset); }
+tr.open:focus-visible { outline: none; }
+tr.open:focus-visible td.pin { box-shadow: inset 2px 0 0 var(--accent); }
+tr.has-said td { border-bottom: 0; }
+.who { display: block; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0.1rem 0 0 1rem; }
+tr.said td { padding-top: 0; }
+.said-text { position: sticky; left: 0.75rem; display: block; max-width: min(56rem, calc(100vw - 5rem));
+  padding-left: 1rem; font-size: 0.8125rem; color: var(--text-muted); line-height: 1.5; }
+
+[hidden] { display: none !important; }
+.scrim { position: fixed; inset: 0; z-index: 20; background: rgba(23,22,20,0.7); }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(38rem, 100vw);
+  display: flex; flex-direction: column; background: var(--bg-elev); border-left: 1px solid var(--border-hi); }
+.drawer header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; }
+.drawer h2 { margin: 0.15rem 0 0.25rem; font-size: 1.125rem; font-weight: 500; letter-spacing: -0.03em; }
+.drawer .sub { font-family: var(--mono); font-size: 0.6875rem; color: var(--text-muted); }
+.close { font: inherit; font-family: var(--mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--text); background: var(--bg-inset); border: 1px solid var(--border-hi); border-radius: var(--radius-sm); padding: 0.35rem 0.7rem; cursor: pointer; }
+.close:hover { border-color: var(--accent); }
+.close:active { transform: scale(0.98); }
+.log { flex: 1; overflow-y: auto; padding: 1rem 1.25rem 2rem; background: var(--bg-code); }
+.log .say { margin: 1rem 0 0.4rem; font-size: 0.875rem; line-height: 1.7; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.log .say time { display: block; font-family: var(--mono); font-size: 0.625rem; color: var(--text-faint); margin-bottom: 0.15rem; }
+.log .step { font-family: var(--mono); font-size: 0.6875rem; color: var(--text-muted); padding-left: 0.9rem; position: relative;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log .step::before { content: '›'; position: absolute; left: 0; color: var(--accent); }
+.log .err { font-family: var(--mono); font-size: 0.6875rem; color: var(--bad-ink); background: var(--pale-bad-bg);
+  border-radius: var(--radius-sm); padding: 0.3rem 0.6rem; margin: 0.3rem 0; overflow-wrap: anywhere; }
+.log .mark { display: flex; align-items: center; gap: 0.6rem; margin: 1.1rem 0; }
+.log .mark::before, .log .mark::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.log .note { font-size: 0.75rem; color: var(--text-muted); }
+
+@media (max-width: 920px) {
+  .banner, .two { grid-template-columns: minmax(0, 1fr); }
+  .verdict { border-right: 0; border-bottom: 1px solid var(--border); }
+  .stats { border-radius: 0 0 var(--radius) var(--radius); }
+  .timeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 540px) {
+  .top { height: 3.75rem; padding-inline: 1rem; }
+  main { padding: 1rem; gap: 1.25rem; }
+  .timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .col-opt { display: none; }
+  .drawer { width: 100vw; border-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>bulwark</b><span>run monitor</span></div>
+  <div class="fresh" id="fresh"><span class="dot"></span>connecting</div>
+</header>
+<main>
+  <div id="readfail" class="card fail" hidden></div>
+
+  <section>
+    <p class="kicker">Run health</p>
+    <div class="card banner">
+      <div class="verdict" id="verdict"><span class="label">Overall</span><h1>Unavailable</h1></div>
+      <div class="stats">
+        <div class="stat"><span class="label">Run time</span><span class="v" id="s-run">Unavailable</span></div>
+        <div class="stat"><span class="label">Sessions</span><span class="v" id="s-sessions">Unavailable</span></div>
+        <div class="stat"><span class="label">Spent</span><span class="v" id="s-spent">Unavailable</span></div>
+        <div class="stat"><span class="label">Findings</span><span class="v" id="s-findings">Unavailable</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="kicker">Passes</p>
+    <div class="timeline" id="timeline"></div>
+  </section>
+
+  <section>
+    <p class="kicker">Sessions</p>
+    <div class="card scroll"><table>
+      <thead><tr>
+        <th class="pin">Session</th><th>State</th><th class="r">Elapsed</th><th class="r">Silent</th>
+        <th class="r">Turns</th><th class="r">Tools</th><th class="r">Bash</th><th class="r">Forge test</th>
+        <th>Skills</th><th class="r">Denied</th><th class="r col-opt">Cost</th><th class="col-opt">Model</th>
+        <th>Why</th><th class="col-opt">Last tool</th>
+      </tr></thead>
+      <tbody id="sessions"></tbody>
+    </table></div>
+  </section>
+
+  <div class="two">
+    <section>
+      <p class="kicker">Pass 2 agents</p>
+      <div class="card scroll"><table>
+        <thead><tr><th>Agent</th><th class="r">Findings</th><th class="r">Read in full</th><th class="r">Hypotheses</th></tr></thead>
+        <tbody id="agents"></tbody>
+      </table></div>
+    </section>
+    <section>
+      <p class="kicker" id="findings-kicker">Findings</p>
+      <div class="card scroll"><table>
+        <thead><tr><th>Severity</th><th>Title</th><th>Contract</th><th class="col-opt">Confidence</th><th class="col-opt">Source</th><th>PoC</th></tr></thead>
+        <tbody id="findings"></tbody>
+      </table></div>
+    </section>
+  </div>
+</main>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="lb-title" hidden>
+  <header>
+    <div>
+      <span class="kicker">Logbook</span>
+      <h2 id="lb-title"></h2>
+      <div class="sub" id="lb-sub"></div>
+    </div>
+    <button class="close" id="lb-close" type="button">Close</button>
+  </header>
+  <div class="log" id="lb-log" tabindex="0"></div>
+</aside>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dur = (s) => {
+  if (s == null) return '';
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+};
+const usd = (v) => v == null ? '' : '$' + v.toFixed(2);
+const VERDICT = { green: 'Healthy', amber: 'Needs a look', red: 'Faulty' };
+const STATE_BADGE = { running: 'b-accent', completed: 'b-ok', done: 'b-ok', failed: 'b-bad', stalled: 'b-bad', skipped: '', pending: '', not_implemented: '' };
+const SEV = { critical: 'b-bad', high: 'b-bad', medium: 'b-warn', low: '', informational: '' };
+let lastOk = null;
+
+function render(d) {
+  const o = d.overall;
+  const reasons = o.reasons.length ? '<ul>' + o.reasons.map((r) => '<li>' + esc(r) + '</li>').join('') + '</ul>'
+    : '<p class="muted" style="font-size:0.75rem">No session tripped a rule.</p>';
+  $('verdict').className = 'verdict h-' + o.health;
+  $('verdict').innerHTML = '<span class="label">Overall</span><h1>' + VERDICT[o.health] + '</h1>' + reasons;
+
+  const runS = d.run_started_at ? Math.max(0, (Date.parse(d.generated_at) - Date.parse(d.run_started_at)) / 1000 | 0) : null;
+  $('s-run').textContent = runS == null ? 'Not started' : dur(runS);
+  $('s-sessions').innerHTML = o.running + '<span class="u">running</span> ' + o.finished + '<span class="u">done</span>';
+  const b = d.budget;
+  $('s-spent').innerHTML = b.spent_usd == null ? 'No ledger'
+    : usd(b.spent_usd) + (b.max_usd != null ? '<span class="u">of ' + usd(b.max_usd) + '</span>' : '');
+  const f = d.findings;
+  $('s-findings').innerHTML = f.items == null ? 'Unavailable'
+    : !f.source ? 'None yet'
+    : f.items.length + (f.source ? '<span class="u">' + f.source + '</span>' : '');
+
+  $('timeline').innerHTML = d.passes.map((p) =>
+    '<div class="pass ' + esc(p.state) + '"><span class="n">PASS ' + p.number + '</span>' +
+    '<span class="name">' + esc(p.name) + '</span>' +
+    '<span class="badge ' + (STATE_BADGE[p.state] ?? '') + '">' + esc(p.state.replace('_', ' ')) + '</span>' +
+    '<div class="meta">' + (p.duration_s != null ? dur(p.duration_s) : '&nbsp;') + (p.sessions ? ' · ' + p.sessions + ' sess' : '') + '</div></div>'
+  ).join('');
+
+  const focused = document.activeElement?.closest?.('#sessions tr[data-label]')?.dataset.label;
+  $('sessions').innerHTML = d.sessions.length ? d.sessions.map((s) => {
+    const skills = s.skills.length ? [...new Set(s.skills)].map(esc).join(', ') : '';
+    const restarts = s.restarts ? ' <span class="badge b-warn">' + s.restarts + ' restart' + (s.restarts > 1 ? 's' : '') + '</span>' : '';
+    const turns = s.state === 'running' ? s.turns : (s.final_turns ?? s.turns);
+    const open = 'class="open' + (s.last_said ? ' has-said' : '') + '" tabindex="0" data-label="' + esc(s.label) + '"';
+    const said = s.last_said ? '<tr class="open said" tabindex="-1" data-label="' + esc(s.label) + '"><td colspan="14"><span class="said-text">' + esc(s.last_said) + '</span></td></tr>' : '';
+    return '<tr ' + open + '>' +
+      '<td class="sess pin"><span class="hdot d-' + s.health + '" title="' + s.health + '"></span> ' + esc(s.label) +
+      (s.persona ? '<span class="who">' + esc(s.persona.name) + '</span>' : '') + '</td>' +
+      '<td><span class="badge ' + (STATE_BADGE[s.state] ?? '') + '">' + esc(s.outcome && s.state !== 'running' ? s.outcome : s.state) + '</span>' + restarts + '</td>' +
+      '<td class="r">' + dur(s.elapsed_s) + '</td>' +
+      '<td class="r">' + (s.silent_s != null ? dur(s.silent_s) : '') + '</td>' +
+      '<td class="r">' + turns + '</td>' +
+      '<td class="r">' + s.total_tool_calls + '</td>' +
+      '<td class="r">' + s.bash_commands + '</td>' +
+      '<td class="r">' + s.forge_test_runs + '</td>' +
+      '<td class="mono" style="font-size:0.6875rem;white-space:nowrap">' + skills + '</td>' +
+      '<td class="r">' + (s.permission_denials ? '<span class="badge b-bad">' + s.permission_denials + '</span>' : '0') + '</td>' +
+      '<td class="r col-opt">' + usd(s.cost_usd) + '</td>' +
+      '<td class="mono col-opt" style="font-size:0.6875rem;white-space:nowrap">' + esc(s.model) + '</td>' +
+      '<td class="why ' + (s.health === 'red' ? 'red' : '') + '">' + esc(s.reasons.join(', ')) + '</td>' +
+      '<td class="last col-opt" title="' + esc(s.last_tool) + '">' + esc(s.last_tool) + '</td>' +
+      '</tr>' + said;
+  }).join('') : '<tr><td colspan="14" class="empty">No sessions recorded yet.</td></tr>';
+  if (focused) $('sessions').querySelector('tr.open:not(.said)[data-label="' + CSS.escape(focused) + '"]')?.focus();
+
+  $('agents').innerHTML = d.agents.length ? d.agents.map((a) => {
+    const c = a.coverage;
+    return '<tr><td class="sess">' + esc(a.name) + '</td>' +
+      '<td class="r">' + (a.findings == null ? '<span class="muted" style="white-space:nowrap">none yet</span>' : a.findings) + '</td>' +
+      '<td class="r">' + (c ? c.files_read_in_full + ' / ' + c.files : '<span class="muted" style="white-space:nowrap">none yet</span>') + '</td>' +
+      '<td class="r">' + (c && c.hypotheses != null ? c.hypotheses : '') + '</td></tr>';
+  }).join('') : '<tr><td colspan="4" class="empty">Pass 2 has not written anything yet.</td></tr>';
+
+  $('findings-kicker').textContent = f.source === 'validated' ? 'Validated findings' : f.source === 'merged' ? 'Merged findings' : 'Findings';
+  $('findings').innerHTML = f.items == null
+    ? '<tr><td colspan="6" class="empty" style="color:var(--bad)">The findings file could not be read.</td></tr>'
+    : f.items.length ? f.items.map((x) =>
+      '<tr><td><span class="badge ' + (SEV[x.severity.toLowerCase()] ?? '') + '">' + esc(x.severity) + '</span></td>' +
+      '<td>' + esc(x.title) + '</td><td class="mono" style="font-size:0.75rem">' + esc(x.contract) + '</td>' +
+      '<td class="col-opt">' + esc(x.confidence) + '</td><td class="col-opt mono" style="font-size:0.6875rem">' + esc(x.source) + '</td>' +
+      '<td><span class="badge ' + (x.poc_status === 'compiles_and_demonstrates' ? 'b-ok' : '') + '">' + esc(x.poc_status.replaceAll('_', ' ')) + '</span></td></tr>'
+    ).join('') : '<tr><td colspan="6" class="empty">No merged findings yet.</td></tr>';
+
+  const rf = $('readfail');
+  rf.hidden = !d.errors.length;
+  if (d.errors.length) rf.innerHTML = 'Some workspace files could not be read; what they feed is shown as unavailable.<ul>' + d.errors.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul>';
+}
+
+function unavailable(msg) {
+  const rf = $('readfail');
+  rf.hidden = false;
+  rf.textContent = 'Could not load /api/status: ' + msg + '. The figures below are from ' + (lastOk ? 'the last good read at ' + lastOk.toLocaleTimeString() : 'no read at all') + '.';
+}
+
+async function tick() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json());
+    lastOk = new Date();
+  } catch (e) {
+    unavailable(e.message);
+  }
+  $('fresh').innerHTML = '<span class="dot"></span>' + (lastOk ? 'updated ' + lastOk.toLocaleTimeString() : 'no data');
+}
+tick();
+setInterval(tick, 5000);
+
+// ── Logbook drawer ───────────────────────────────────────────────
+let lbLabel = null, lbSig = '', lbFocus = null;
+const time = (t) => t ? new Date(t).toLocaleTimeString() : '';
+
+function entryHtml(e) {
+  switch (e.kind) {
+    case 'say': return '<p class="say">' + (e.at ? '<time>' + time(e.at) + '</time>' : '') + esc(e.text) + '</p>';
+    case 'step': return '<div class="step" title="' + esc(e.summary) + '">' + esc(e.summary) + '</div>';
+    case 'error': return '<div class="err">' + esc(e.text) + '</div>';
+    case 'restart': return '<div class="mark"><span class="badge b-warn">restarted after silence' + (e.at ? ' · ' + time(e.at) : '') + '</span></div>';
+    case 'end': {
+      const bits = [e.subtype, e.turns != null ? e.turns + ' turns' : '', e.duration_ms != null ? dur(Math.round(e.duration_ms / 1000)) : '', usd(e.cost_usd)].filter(Boolean);
+      return '<div class="mark"><span class="badge ' + (e.subtype === 'success' ? 'b-ok' : 'b-bad') + '">ended · ' + esc(bits.join(' · ')) + '</span></div>';
+    }
+  }
+  return '';
+}
+
+async function loadLog() {
+  if (!lbLabel) return;
+  const label = lbLabel, log = $('lb-log');
+  try {
+    const r = await fetch('/api/logbook?label=' + encodeURIComponent(label), { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status === 404 ? 'no session with this label' : 'HTTP ' + r.status);
+    const b = await r.json();
+    if (label !== lbLabel) return;
+    $('lb-title').textContent = b.persona ? b.persona.name : b.label;
+    $('lb-sub').innerHTML = esc(b.label) + (b.state ? ' <span class="badge ' + (STATE_BADGE[b.state] ?? '') + '">' + esc(b.state) + '</span>' : '');
+    const last = b.entries[b.entries.length - 1];
+    const sig = b.total + ':' + JSON.stringify(last ?? null);
+    if (sig === lbSig) return;
+    const atBottom = !lbSig || log.scrollTop + log.clientHeight >= log.scrollHeight - 48;
+    lbSig = sig;
+    log.innerHTML = (b.truncated ? '<p class="note">Showing the last ' + b.entries.length + ' of ' + b.total + ' entries.</p>' : '') +
+      (b.entries.length ? b.entries.map(entryHtml).join('') : '<p class="note">Nothing written yet.</p>');
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  } catch (e) {
+    lbSig = '';
+    log.innerHTML = '<div class="err">Could not load the logbook: ' + esc(e.message) + '.</div>';
+  }
+}
+
+function openLog(label, fromHash) {
+  if (lbLabel === label) return;
+  lbLabel = label; lbSig = '';
+  lbFocus = fromHash ? null : document.activeElement;
+  $('lb-title').textContent = label; $('lb-sub').textContent = ''; $('lb-log').innerHTML = '<p class="note">Loading.</p>';
+  $('drawer').hidden = false; $('scrim').hidden = false;
+  if (!fromHash) history.replaceState(null, '', '#log=' + encodeURIComponent(label));
+  $('lb-close').focus();
+  loadLog();
+}
+
+function closeLog() {
+  if (!lbLabel) return;
+  lbLabel = null; lbSig = '';
+  $('drawer').hidden = true; $('scrim').hidden = true;
+  history.replaceState(null, '', location.pathname + location.search);
+  if (lbFocus && document.contains(lbFocus)) lbFocus.focus();
+}
+
+$('sessions').addEventListener('click', (ev) => {
+  const row = ev.target.closest('tr[data-label]');
+  if (row) openLog(row.dataset.label);
+});
+$('sessions').addEventListener('keydown', (ev) => {
+  const row = ev.target.closest('tr[data-label]');
+  if (row && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); openLog(row.dataset.label); }
+});
+$('lb-close').addEventListener('click', closeLog);
+$('scrim').addEventListener('click', closeLog);
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeLog(); });
+
+function fromHash() {
+  const m = location.hash.match(/^#log=(.+)$/);
+  if (m) openLog(decodeURIComponent(m[1]), true); else closeLog();
+}
+window.addEventListener('hashchange', fromHash);
+fromHash();
+setInterval(loadLog, 5000);
+</script>
+</body>
+</html>

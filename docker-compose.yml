@@ -6,6 +6,9 @@ services:
     container_name: bulwark
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # A login carries the account's claude.ai connectors (Gmail, Slack, Drive). Agents read
+      # untrusted target code with Bash, so they must not have them.
+      - ENABLE_CLAUDEAI_MCP_SERVERS=false
       # BULWARK_ROOT = project dir (bulwark.toml + context/ + optional prompts/ overrides).
       # Set BULWARK_PROJECT on the host to point at your project directory.
       # Default: current directory (works when running from inside a project dir).
@@ -30,6 +33,23 @@ services:
         limits:
           memory: 16G
           cpus: "8"
+
+  # Live run dashboard: `docker compose up -d dashboard`, then `ssh -L 8484:localhost:8484 <host>`.
+  dashboard:
+    image: bulwark-audit-env
+    container_name: bulwark-dash
+    # The image keeps its own built-in bulwark.toml in /home/auditor, so start in the project.
+    working_dir: /home/auditor/project
+    entrypoint: ["/usr/local/bin/bulwark"]
+    command: ["dashboard", "--bind", "0.0.0.0"]
+    environment:
+      - BULWARK_INSTALL=/home/auditor
+    volumes:
+      - ${BULWARK_PROJECT:-.}:/home/auditor/project:ro
+      - audit-outputs:/home/auditor/audits:ro
+    ports:
+      - "127.0.0.1:8484:8484"
+    restart: unless-stopped
 
 volumes:
   audit-outputs:
