@@ -139,10 +139,14 @@ echo "→ Installing AI audit skills..."
 # ── Compile contracts ────────────────────────────────────────────────
 # Try forge build from root; if the repo is a monorepo, try each package subdir.
 echo "→ Compiling contracts..."
-# FOUNDRY_EVM_VERSION=cancun ensures Vyper 0.3.x contracts compile — Vyper does not support
-# the 'prague' EVM target that newer Foundry versions default to. Cancun is current mainnet.
+# Vyper 0.3.x cannot target 'prague', the newer Foundry default, so fall back to cancun. The env
+# var beats foundry.toml, so only set it when the target has not pinned its own evm_version.
+evm_env() {
+    grep -qs '^\s*evm_version' "${1:-.}/foundry.toml" && return
+    echo "FOUNDRY_EVM_VERSION=cancun"
+}
 if [ -f "foundry.toml" ] || [ -f "forge.config.toml" ]; then
-    if build_out=$(FOUNDRY_EVM_VERSION=cancun forge build 2>&1); then
+    if build_out=$(env $(evm_env .) forge build 2>&1); then
         echo "  ✓ Compiled"
     else
         echo "$build_out" | tail -20
@@ -152,7 +156,7 @@ elif [ -d "packages" ]; then
     for pkg in packages/*/; do
         [ -f "${pkg}foundry.toml" ] || continue
         pkg_name=$(basename "$pkg")
-        (cd "$pkg" && FOUNDRY_EVM_VERSION=cancun forge build 2>/dev/null) \
+        (cd "$pkg" && env $(evm_env .) forge build 2>/dev/null) \
             && echo "  ✓ $pkg_name compiled" \
             || echo "  ✗ $pkg_name build failed (Pass 1 will retry)"
     done
