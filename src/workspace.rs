@@ -57,6 +57,11 @@ impl Workspace {
         self.root.join("pipeline-status.json")
     }
 
+    /// Results the target's own `slither.db.json` had triaged away.
+    pub fn slither_triaged(&self) -> PathBuf {
+        self.recon_dir().join("slither-triaged.json")
+    }
+
     pub fn known_duplicates(&self) -> PathBuf {
         self.findings_dir().join("known-duplicates.json")
     }

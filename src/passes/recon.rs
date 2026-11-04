@@ -26,7 +26,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         if !pkg_path.exists() {
             continue;
         }
-        let pkg_name = pkg_path.file_name().unwrap_or_default().to_string_lossy();
+        let pkg_name = package_label(&pkg_path);
         eprintln!("    Building {pkg_name}...");
 
         if let Some(cmd) = &ctx.config.target.pre_build_cmd {
@@ -104,6 +104,18 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let slither_summary = aggregate_slither_summary(&slither_combined);
     write_json(&recon_dir.join("slither-results.json"), &slither_combined)?;
     eprintln!("    {} Slither: {slither_summary}", style("✓").green());
+    let triaged = collect_triaged(ctx);
+    std::fs::write(
+        ctx.workspace.slither_triaged(),
+        serde_json::to_string_pretty(&triaged)?,
+    )?;
+    if !triaged.is_empty() {
+        eprintln!(
+            "    {} {} results triaged in the target's slither.db.json, kept as known issues",
+            style("✓").green(),
+            triaged.len()
+        );
+    }
 
     // ── 1.3b AI-assisted vulnerability scan (scv-scan) ────────────
     if ctx.config.passes.recon.scv_scan {
@@ -288,6 +300,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "recon/entry-points.json",
             "recon/storage-layouts.json",
             "recon/slither-results.json",
+            "recon/slither-triaged.json",
             "recon/scv-scan-results.json",
             "recon/dependency-graph.json",
             "recon/math-operations.json",
@@ -399,6 +412,7 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
     }
 
     let slither_bin = ctx.config.resolve_tool("slither")?;
+    let triage_db = recon_dir.join("slither.db.json");
 
     for pkg in &ctx.config.target.scope {
         let pkg_path = ctx.audit_dir.join(pkg);
@@ -406,17 +420,13 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
             continue;
         }
         let contracts_dir = sol_root(&pkg_path);
-
-        let pkg_name = Path::new(pkg)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let pkg_name = package_label(&pkg_path);
 
         eprintln!("    Analysing {pkg_name}...");
         let output_path = recon_dir.join(format!("slither-{pkg_name}-raw.json"));
 
-        let result = slither::analyze(&slither_bin, &contracts_dir, &output_path).await?;
+        let result =
+            slither::analyze(&slither_bin, &contracts_dir, &output_path, &triage_db).await?;
         if let Some(json) = result.json {
             combined["packages"][&pkg_name] = json;
             eprintln!(
@@ -432,6 +442,44 @@ async fn run_slither_analysis(ctx: &PipelineContext, recon_dir: &Path) -> Result
     }
 
     Ok(combined)
+}
+
+/// Results the target's own `slither.db.json` triaged, for known-issue extraction.
+fn collect_triaged(ctx: &PipelineContext) -> Vec<slither::TriagedResult> {
+    let mut triaged: Vec<slither::TriagedResult> = Vec::new();
+    let mut seen_dbs = Vec::new();
+    for pkg in &ctx.config.target.scope {
+        let pkg_path = ctx.audit_dir.join(pkg);
+        if !pkg_path.exists() {
+            continue;
+        }
+        let contracts_dir = sol_root(&pkg_path);
+        let db = slither::working_dir(&contracts_dir).join("slither.db.json");
+        if seen_dbs.contains(&db) {
+            continue;
+        }
+        let Some(json) = std::fs::read_to_string(&db)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        else {
+            continue;
+        };
+        for r in slither::parse_triage_db(&json) {
+            if !triaged.iter().any(|t| t.id == r.id) {
+                triaged.push(r);
+            }
+        }
+        seen_dbs.push(db);
+    }
+    triaged
+}
+
+/// A package's name for file names and map keys; scope "." is named after the repo.
+fn package_label(pkg_path: &Path) -> String {
+    let named = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
+    named(pkg_path)
+        .or_else(|| pkg_path.canonicalize().ok().and_then(|p| named(&p)))
+        .unwrap_or_else(|| "root".into())
 }
 
 fn aggregate_slither_summary(combined: &Value) -> slither::SlitherSummary {
@@ -460,11 +508,7 @@ async fn map_entry_points(ctx: &PipelineContext, forge_bin: &Path) -> Result<Val
         if !pkg_path.exists() {
             continue;
         }
-        let pkg_name = Path::new(pkg)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let pkg_name = package_label(&pkg_path);
 
         for contract in &ctx.config.target.core_contracts {
             // Skip contracts already inspected from a previous package
@@ -1167,4 +1211,53 @@ fn identify_proxies(ctx: &PipelineContext) -> Result<Value> {
     }
 
     Ok(Value::Array(proxies))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_scope_is_named_after_the_repo() {
+        assert_eq!(
+            package_label(Path::new("/t/protocol-onyx/.")),
+            "protocol-onyx"
+        );
+        assert_eq!(
+            package_label(Path::new("/t/mono/packages/horizon")),
+            "horizon"
+        );
+        assert!(!package_label(Path::new(".")).is_empty());
+    }
+
+    #[test]
+    fn triaged_results_come_from_slithers_working_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("protocol-onyx");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("slither.db.json"),
+            include_str!("../tools/testdata/slither.db.json"),
+        )
+        .unwrap();
+        // Two scopes reaching the same database must not double its records.
+        let config: crate::config::Config = toml::from_str(
+            "[target]\nrepo = \"x\"\nscope = [\".\", \"src/..\"]\ncore_contracts = []\n",
+        )
+        .unwrap();
+        let workspace = crate::workspace::Workspace::new(&repo, "ws");
+        workspace.init().unwrap();
+        let ledger = crate::budget::Ledger::open(workspace.cost_ledger(), None, true).unwrap();
+        let ctx = PipelineContext {
+            config,
+            workspace,
+            audit_dir: repo.clone(),
+            bulwark_root: repo.clone(),
+            bulwark_install: repo.clone(),
+            ledger,
+        };
+        let triaged = collect_triaged(&ctx);
+        assert_eq!(triaged.len(), 4);
+        assert_eq!(triaged[0].contract, "SyncRedeemHandler");
+    }
 }
