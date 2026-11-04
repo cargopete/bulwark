@@ -650,13 +650,13 @@ echo '{"type":"result","subtype":"success","result":"done","total_cost_usd":0.5,
         let count = dir.path().join("count");
         let s = fake_claude(
             dir.path(),
-            // The stdout line comes after the count, so the silence timer only starts once it is written.
+            // A spawn slower than the stall window is itself a stall, so the window leaves room for load.
             &format!(
                 "echo x >> {}\necho '{{\"type\":\"system\"}}'\nexec sleep 30",
                 count.display()
             ),
         );
-        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
+        let out = s.run_watched(Duration::from_secs(3)).await.unwrap();
         assert_eq!(out.exit_code, STALLED_EXIT);
         let attempts = std::fs::read_to_string(&count).unwrap().lines().count();
         assert_eq!(attempts as u32, MAX_STALL_RESTARTS + 1);
