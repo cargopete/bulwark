@@ -89,6 +89,11 @@ pub fn parse_events(text: &str) -> Activity {
         match ev.get("type").and_then(Value::as_str) {
             Some("system") if ev.get("subtype").and_then(Value::as_str) == Some("init") => {
                 inits += 1;
+                // A session waiting on background tasks ends a turn with a `result`, then resumes
+                // with a fresh `init`: that is a continuation, not the end and not a restart.
+                if inits > 1 && a.result.take().is_none() {
+                    a.restarts += 1;
+                }
                 if let Some(m) = ev.get("model").and_then(Value::as_str) {
                     a.model = Some(m.to_string());
                 }
@@ -143,7 +148,6 @@ pub fn parse_events(text: &str) -> Activity {
             _ => {}
         }
     }
-    a.restarts = inits.saturating_sub(1);
     let reported = a.result.as_ref().map_or(0, |r| r.permission_denials);
     a.permission_denials = denied_in_stream.max(reported);
     a
@@ -594,12 +598,12 @@ fn session_view(
     };
     let end = activity.result.clone();
 
-    let ledger_outcome = entry
-        .map(|e| e.outcome.as_str())
-        .filter(|o| *o != "running");
-    let outcome = ledger_outcome
-        .map(str::to_string)
-        .or_else(|| end.as_ref().map(|r| r.subtype.clone()));
+    // The ledger settles only when the process exits; a `result` mid-stream can be a pause.
+    let outcome = match entry.map(|e| e.outcome.as_str()) {
+        Some("running") => None,
+        Some(o) => Some(o.to_string()),
+        None => end.as_ref().map(|r| r.subtype.clone()),
+    };
     let state = match outcome.as_deref() {
         None => State::Running,
         Some("success") | Some("error_max_turns") => State::Done,
@@ -1065,6 +1069,17 @@ mod tests {
     }
 
     #[test]
+    fn a_result_followed_by_init_is_a_pause_not_an_end_or_restart() {
+        let pause =
+            json!({"type": "result", "subtype": "success", "result": "Waiting."}).to_string();
+        let a = parse_events(&stream(&[init("m"), pause.clone(), init("m")]));
+        assert!(a.result.is_none());
+        assert_eq!(a.restarts, 0);
+        let a = parse_events(&stream(&[init("m"), pause, init("m"), init("m")]));
+        assert_eq!(a.restarts, 1);
+    }
+
+    #[test]
     fn long_last_tool_is_one_truncated_line() {
         let cmd = format!("{}\nsecond line", "x".repeat(300));
         let a = parse_events(&tool("Bash", json!({"command": cmd})));
@@ -1290,6 +1305,8 @@ mod tests {
             &stream(&[
                 init("claude-opus-5-5"),
                 tool("Bash", json!({"command": "forge test"})),
+                // Paused on background tasks: the ledger still says running.
+                json!({"type": "result", "subtype": "success"}).to_string(),
             ]),
         );
         let done = json!({"type": "result", "subtype": "success", "num_turns": 5,

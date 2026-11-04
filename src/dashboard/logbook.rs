@@ -29,6 +29,10 @@ pub enum Entry {
     Restart {
         at: Option<String>,
     },
+    /// The session ended a turn to wait on background tasks, then carried on.
+    Waited {
+        at: Option<String>,
+    },
     End {
         subtype: String,
         turns: Option<u64>,
@@ -70,7 +74,14 @@ pub fn extract(text: &str) -> Vec<Entry> {
             Some("system") if ev.get("subtype").and_then(Value::as_str) == Some("init") => {
                 inits += 1;
                 if inits > 1 {
-                    out.push(Entry::Restart { at });
+                    match out.last() {
+                        Some(Entry::End { at: ended, .. }) => {
+                            let at = ended.clone().or(at);
+                            out.pop();
+                            out.push(Entry::Waited { at });
+                        }
+                        _ => out.push(Entry::Restart { at }),
+                    }
                 }
             }
             Some("assistant") => {
@@ -186,6 +197,13 @@ mod tests {
 
     fn init() -> Value {
         json!({"type": "system", "subtype": "init", "model": "m"})
+    }
+
+    #[test]
+    fn a_result_then_init_reads_as_a_wait() {
+        let pause = json!({"type": "result", "subtype": "success", "num_turns": 3});
+        let e = extract(&lines(&[init(), pause, init()]));
+        assert!(matches!(e.as_slice(), [Entry::Waited { .. }]));
     }
 
     fn say_then_run(text: &str, cmd: &str) -> Value {
