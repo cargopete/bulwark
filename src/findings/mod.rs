@@ -106,6 +106,8 @@ impl std::fmt::Display for Confidence {
 #[serde(rename_all = "snake_case")]
 pub enum PocStatus {
     CompilesAndDemonstrates,
+    /// Measured impact, but on a local deployment rather than a fork of deployed contracts.
+    DemonstratedLocal,
     CompilesButInconclusive,
     FailedToCompile,
     InfeasibleConditions,
@@ -117,6 +119,7 @@ impl std::fmt::Display for PocStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CompilesAndDemonstrates => write!(f, "compiles_and_demonstrates"),
+            Self::DemonstratedLocal => write!(f, "demonstrated_local"),
             Self::CompilesButInconclusive => write!(f, "compiles_but_inconclusive"),
             Self::FailedToCompile => write!(f, "failed_to_compile"),
             Self::InfeasibleConditions => write!(f, "infeasible_conditions"),
@@ -199,6 +202,13 @@ mod tests {
     fn poc_status_serialization_uses_snake_case() {
         let json = serde_json::to_value(PocStatus::CompilesAndDemonstrates).unwrap();
         assert_eq!(json.as_str().unwrap(), "compiles_and_demonstrates");
+
+        let json = serde_json::to_value(PocStatus::DemonstratedLocal).unwrap();
+        assert_eq!(json.as_str().unwrap(), "demonstrated_local");
+        assert_eq!(
+            PocStatus::DemonstratedLocal.to_string(),
+            "demonstrated_local"
+        );
 
         let json = serde_json::to_value(PocStatus::CompilesButInconclusive).unwrap();
         assert_eq!(json.as_str().unwrap(), "compiles_but_inconclusive");

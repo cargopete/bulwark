@@ -234,6 +234,7 @@ const dur = (s) => {
 const usd = (v) => v == null ? '' : '$' + v.toFixed(2);
 const VERDICT = { green: 'Healthy', amber: 'Needs a look', red: 'Faulty' };
 const STATE_BADGE = { running: 'b-accent', completed: 'b-ok', done: 'b-ok', failed: 'b-bad', stalled: 'b-bad', skipped: '', pending: '', not_implemented: '' };
+const POC_BADGE = { compiles_and_demonstrates: 'b-ok', demonstrated_local: 'b-accent' };
 const SEV = { critical: 'b-bad', high: 'b-bad', medium: 'b-warn', low: '', informational: '' };
 let lastOk = null;
 
@@ -304,7 +305,7 @@ function render(d) {
       '<tr><td><span class="badge ' + (SEV[x.severity.toLowerCase()] ?? '') + '">' + esc(x.severity) + '</span></td>' +
       '<td>' + esc(x.title) + '</td><td class="mono" style="font-size:0.75rem">' + esc(x.contract) + '</td>' +
       '<td class="col-opt">' + esc(x.confidence) + '</td><td class="col-opt mono" style="font-size:0.6875rem">' + esc(x.source) + '</td>' +
-      '<td><span class="badge ' + (x.poc_status === 'compiles_and_demonstrates' ? 'b-ok' : '') + '">' + esc(x.poc_status.replaceAll('_', ' ')) + '</span></td></tr>'
+      '<td><span class="badge ' + (POC_BADGE[x.poc_status] || '') + '">' + esc(x.poc_status.replaceAll('_', ' ')) + '</span></td></tr>'
     ).join('') : '<tr><td colspan="6" class="empty">No merged findings yet.</td></tr>';
 
   const rf = $('readfail');

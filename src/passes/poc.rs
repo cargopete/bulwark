@@ -130,12 +130,22 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     }
 
     let (mode, rpc_url) = poc_mode(&ctx.config.passes.poc)?;
+    let no_addresses = ctx
+        .config
+        .program
+        .as_ref()
+        .is_some_and(|p| !p.has_addresses());
+    let assets_note = if no_addresses {
+        "; program.assets lists no deployed addresses"
+    } else {
+        ""
+    };
     match &mode {
         PocMode::Fork { rpc_env, block } => {
-            eprintln!("  Fork mode: ${rpc_env} pinned at block {block}")
+            eprintln!("  Fork mode: ${rpc_env} pinned at block {block}{assets_note}")
         }
         PocMode::Local => eprintln!(
-            "  {} Local mode: no fork configured, so no PoC can count as demonstrated",
+            "  {} Local mode: no fork configured{assets_note}, so demonstrated_local is the best grade available",
             style("⚠").yellow()
         ),
     }
@@ -184,6 +194,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             &poc_file,
             ctx,
             &failed_packages,
+            &mode,
             &mut validated,
             &mut unverifiable,
             &mut discarded,
@@ -208,13 +219,15 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         &Value::Array(discarded),
     )?;
 
-    let survived = stats.validated + stats.inconclusive + stats.unverifiable;
+    let survived =
+        stats.validated + stats.validated_local + stats.inconclusive + stats.unverifiable;
     eprintln!();
     eprintln!(
-        "  {} Input: {} | Validated: {} | Inconclusive: {} | Unverifiable: {} | Discarded: {} | Survived: {}",
+        "  {} Input: {} | Validated: {} | Local: {} | Inconclusive: {} | Unverifiable: {} | Discarded: {} | Survived: {}",
         style("✓").green(),
         findings.len(),
         stats.validated,
+        stats.validated_local,
         stats.inconclusive,
         stats.unverifiable,
         stats.discarded,
@@ -222,14 +235,19 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     );
 
     Ok(format!(
-        "{survived} survived ({} validated, {} inconclusive, {} unverifiable, {} discarded)",
-        stats.validated, stats.inconclusive, stats.unverifiable, stats.discarded
+        "{survived} survived ({} validated, {} demonstrated locally, {} inconclusive, {} unverifiable, {} discarded)",
+        stats.validated,
+        stats.validated_local,
+        stats.inconclusive,
+        stats.unverifiable,
+        stats.discarded
     ))
 }
 
 #[derive(Default)]
 struct PocStats {
     validated: usize,
+    validated_local: usize,
     inconclusive: usize,
     unverifiable: usize,
     discarded: usize,
@@ -506,6 +524,7 @@ fn apply_validation_gate(
     poc_file: &Path,
     ctx: &PipelineContext,
     failed_packages: &[String],
+    mode: &PocMode,
     validated: &mut Vec<Value>,
     unverifiable: &mut Vec<Value>,
     discarded: &mut Vec<Value>,
@@ -521,6 +540,7 @@ fn apply_validation_gate(
     };
     let rel_poc = rel(poc_file);
     finding_json["poc_reasons"] = json!(outcome.reasons);
+    finding_json["poc_mode"] = json!(mode.label());
     if !outcome.record.is_null() {
         finding_json["poc_record"] = json!(rel(
             &poc_file.with_file_name(format!("{}.poc.json", finding.id))
@@ -547,6 +567,17 @@ fn apply_validation_gate(
             finding_json["poc_status"] = json!(effective_status);
             validated.push(finding_json);
             stats.validated += 1;
+        }
+        "demonstrated_local" => {
+            eprintln!(
+                "    {} DEMONSTRATED LOCALLY — severity preserved ({})",
+                style("✓").green(),
+                finding.severity
+            );
+            finding_json["poc_file"] = json!(rel_poc);
+            finding_json["poc_status"] = json!(effective_status);
+            validated.push(finding_json);
+            stats.validated_local += 1;
         }
         "compiles_but_inconclusive" => {
             // Preserve original severity — inconclusive means we couldn't prove it,

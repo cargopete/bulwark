@@ -121,6 +121,12 @@ impl ProgramConfig {
     }
 
     /// Whether a finding's contract (a file name or a contract name) is a listed asset.
+    pub fn has_addresses(&self) -> bool {
+        self.assets
+            .iter()
+            .any(|a| a.address.as_deref().is_some_and(|s| !s.trim().is_empty()))
+    }
+
     /// With no named assets every contract counts.
     pub fn has_asset(&self, contract: &str) -> bool {
         if self.assets.iter().all(|a| a.name.is_empty()) {
@@ -225,6 +231,16 @@ program_specific = ["Frontrunning, including back-running and sandwich attacks"]
         assert!(p.has_asset("Vault.sol"));
         assert!(p.has_asset("src/core/Vault.sol"));
         assert!(!p.has_asset("VaultHelper.sol"));
+    }
+
+    #[test]
+    fn source_scoped_program_has_no_addresses() {
+        let mut p = program();
+        assert!(!p.has_addresses());
+        p.assets[0].address = Some(" ".into());
+        assert!(!p.has_addresses());
+        p.assets[0].address = Some("0xabc".into());
+        assert!(p.has_addresses());
     }
 
     #[test]
