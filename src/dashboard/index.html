@@ -204,7 +204,7 @@ tr.said td { padding-top: 0; }
     <section>
       <p class="kicker" id="findings-kicker">Findings</p>
       <div class="card scroll"><table>
-        <thead><tr><th>Severity</th><th>Title</th><th>Contract</th><th class="col-opt">Confidence</th><th class="col-opt">Source</th><th>PoC</th></tr></thead>
+        <thead><tr><th>Severity</th><th>Title</th><th>Contract</th><th class="col-opt">Confidence</th><th class="col-opt">Source</th><th>PoC</th><th>Pin</th></tr></thead>
         <tbody id="findings"></tbody>
       </table></div>
     </section>
@@ -234,6 +234,8 @@ const dur = (s) => {
 const usd = (v) => v == null ? '' : '$' + v.toFixed(2);
 const VERDICT = { green: 'Healthy', amber: 'Needs a look', red: 'Faulty' };
 const STATE_BADGE = { running: 'b-accent', completed: 'b-ok', done: 'b-ok', failed: 'b-bad', stalled: 'b-bad', skipped: '', pending: '', not_implemented: '' };
+const PIN = { matches_pin: 'b-ok', differs_from_pin: 'b-warn' };
+const PIN_LABEL = { matches_pin: 'matches', differs_from_pin: 'differs', no_pin: 'no pin' };
 const SEV = { critical: 'b-bad', high: 'b-bad', medium: 'b-warn', low: '', informational: '' };
 let lastOk = null;
 
@@ -299,13 +301,14 @@ function render(d) {
 
   $('findings-kicker').textContent = f.source === 'validated' ? 'Validated findings' : f.source === 'merged' ? 'Merged findings' : 'Findings';
   $('findings').innerHTML = f.items == null
-    ? '<tr><td colspan="6" class="empty" style="color:var(--bad)">The findings file could not be read.</td></tr>'
+    ? '<tr><td colspan="7" class="empty" style="color:var(--bad)">The findings file could not be read.</td></tr>'
     : f.items.length ? f.items.map((x) =>
       '<tr><td><span class="badge ' + (SEV[x.severity.toLowerCase()] ?? '') + '">' + esc(x.severity) + '</span></td>' +
       '<td>' + esc(x.title) + '</td><td class="mono" style="font-size:0.75rem">' + esc(x.contract) + '</td>' +
       '<td class="col-opt">' + esc(x.confidence) + '</td><td class="col-opt mono" style="font-size:0.6875rem">' + esc(x.source) + '</td>' +
-      '<td><span class="badge ' + (x.poc_status === 'compiles_and_demonstrates' ? 'b-ok' : '') + '">' + esc(x.poc_status.replaceAll('_', ' ')) + '</span></td></tr>'
-    ).join('') : '<tr><td colspan="6" class="empty">No merged findings yet.</td></tr>';
+      '<td><span class="badge ' + (x.poc_status === 'compiles_and_demonstrates' ? 'b-ok' : '') + '">' + esc(x.poc_status.replaceAll('_', ' ')) + '</span></td>' +
+      '<td>' + (x.scope_pin ? '<span class="badge ' + (PIN[x.scope_pin] ?? '') + '">' + esc(PIN_LABEL[x.scope_pin] ?? x.scope_pin) + '</span>' : '<span class="muted">-</span>') + '</td></tr>'
+    ).join('') : '<tr><td colspan="7" class="empty">No merged findings yet.</td></tr>';
 
   const rf = $('readfail');
   rf.hidden = !d.errors.length;

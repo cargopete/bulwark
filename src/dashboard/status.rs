@@ -395,6 +395,7 @@ pub struct FindingRow {
     pub contract: String,
     pub source: String,
     pub poc_status: String,
+    pub scope_pin: String,
 }
 
 #[derive(Deserialize)]
@@ -834,6 +835,7 @@ fn finding_row(f: &Value) -> FindingRow {
             .and_then(Value::as_str)
             .unwrap_or("not_attempted")
             .to_string(),
+        scope_pin: s("scope_pin"),
     }
 }
 
