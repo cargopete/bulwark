@@ -650,7 +650,11 @@ echo '{"type":"result","subtype":"success","result":"done","total_cost_usd":0.5,
         let count = dir.path().join("count");
         let s = fake_claude(
             dir.path(),
-            &format!("echo x >> {}\nexec sleep 30", count.display()),
+            // The stdout line comes after the count, so the silence timer only starts once it is written.
+            &format!(
+                "echo x >> {}\necho '{{\"type\":\"system\"}}'\nexec sleep 30",
+                count.display()
+            ),
         );
         let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
         assert_eq!(out.exit_code, STALLED_EXIT);

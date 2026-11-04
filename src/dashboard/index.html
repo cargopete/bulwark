@@ -342,6 +342,7 @@ function entryHtml(e) {
     case 'step': return '<div class="step" title="' + esc(e.summary) + '">' + esc(e.summary) + '</div>';
     case 'error': return '<div class="err">' + esc(e.text) + '</div>';
     case 'restart': return '<div class="mark"><span class="badge b-warn">restarted after silence' + (e.at ? ' · ' + time(e.at) : '') + '</span></div>';
+    case 'waited': return '<div class="mark"><span class="badge">paused for background tasks' + (e.at ? ' · ' + time(e.at) : '') + '</span></div>';
     case 'end': {
       const bits = [e.subtype, e.turns != null ? e.turns + ' turns' : '', e.duration_ms != null ? dur(Math.round(e.duration_ms / 1000)) : '', usd(e.cost_usd)].filter(Boolean);
       return '<div class="mark"><span class="badge ' + (e.subtype === 'success' ? 'b-ok' : 'b-bad') + '">ended · ' + esc(bits.join(' · ')) + '</span></div>';
