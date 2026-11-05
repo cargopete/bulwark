@@ -18,6 +18,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let mut compiler_version = String::from("unknown");
     let mut failed_packages: Vec<String> = Vec::new();
 
+    // ── 1.0 Is the pinned commit what is deployed? ───────────────
+    crate::deployed::check(ctx).await?;
+
     // ── 1.1 Compile contracts ─────────────────────────────────────
     eprintln!("  Compiling contracts...");
 

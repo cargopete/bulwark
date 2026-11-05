@@ -152,6 +152,10 @@ pub struct ReconPassConfig {
     /// Max turns for the scv-scan Claude session.
     #[serde(default = "default_scv_scan_turns")]
     pub scv_scan_max_turns: u32,
+
+    /// What to do when a program asset's deployed source differs from the pinned commit.
+    #[serde(default)]
+    pub deployed_source: crate::deployed::OnMismatch,
 }
 
 impl Default for ReconPassConfig {
@@ -160,6 +164,7 @@ impl Default for ReconPassConfig {
             enabled: true,
             scv_scan: true,
             scv_scan_max_turns: default_scv_scan_turns(),
+            deployed_source: Default::default(),
         }
     }
 }

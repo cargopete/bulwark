@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod coverage;
 mod dashboard;
+mod deployed;
 mod docker;
 mod error;
 mod findings;
