@@ -319,7 +319,16 @@ async fn generate_and_validate_poc(
     finding_cap: Option<f64>,
 ) -> PocOutcome {
     let finding_json = serde_json::to_string_pretty(finding).unwrap_or_default();
-    let rel_poc = format!("test/pocs/{}.t.sol", finding.id);
+    let build_dir = find_build_dir(ctx, &finding.contract);
+    let forge_poc_dir = build_dir
+        .join(crate::tools::forge::test_dir(&build_dir))
+        .join("pocs");
+    let poc_in_project = forge_poc_dir.join(format!("{}.t.sol", finding.id));
+    let rel_poc = poc_in_project
+        .strip_prefix(&build_dir)
+        .unwrap_or(&poc_in_project)
+        .to_string_lossy()
+        .into_owned();
     let (fork_args, shown_fork_args) = run.mode.forge_args(run.rpc_url);
     let shown_command = std::iter::once(format!("forge test --match-path {rel_poc} --json -vv"))
         .chain(shown_fork_args)
@@ -399,10 +408,7 @@ async fn generate_and_validate_poc(
             }
         };
 
-        let build_dir = find_build_dir(ctx, &finding.contract);
-        let forge_poc_dir = build_dir.join("test/pocs");
         let _ = std::fs::create_dir_all(&forge_poc_dir);
-        let poc_in_project = forge_poc_dir.join(format!("{}.t.sol", finding.id));
         if let Err(e) = std::fs::copy(poc_file, &poc_in_project) {
             eprintln!(
                 "    {} Failed to copy PoC into project: {e}",

@@ -19,7 +19,8 @@ pub fn scan_test_infrastructure(ctx: &PipelineContext) -> String {
 
     for pkg in &ctx.config.target.scope {
         let pkg_path = ctx.audit_dir.join(pkg);
-        let test_dir = pkg_path.join("test");
+        let test_rel = crate::tools::forge::test_dir(&pkg_path);
+        let test_dir = pkg_path.join(&test_rel);
 
         // Find test base contracts
         if test_dir.exists() {
@@ -47,7 +48,10 @@ pub fn scan_test_infrastructure(ctx: &PipelineContext) -> String {
             }
 
             if !bases.is_empty() {
-                info.push_str(&format!("\nExisting test bases in {pkg}/test/:\n"));
+                info.push_str(&format!(
+                    "\nExisting test bases in {pkg}/{}/:\n",
+                    test_rel.display()
+                ));
                 for b in &bases {
                     info.push_str(&format!("{b}\n"));
                 }
@@ -60,29 +64,13 @@ pub fn scan_test_infrastructure(ctx: &PipelineContext) -> String {
             info.push_str(&format!("\nRemappings ({pkg}):\n{content}\n"));
         }
 
-        // foundry.toml
-        let foundry_toml = pkg_path.join("foundry.toml");
-        if let Ok(content) = std::fs::read_to_string(&foundry_toml) {
-            let relevant: String = content
-                .lines()
-                .filter(|l| {
-                    [
-                        "src",
-                        "test",
-                        "out",
-                        "libs",
-                        "remappings",
-                        "solc",
-                        "evm_version",
-                    ]
-                    .iter()
-                    .any(|k| l.contains(k))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            if !relevant.is_empty() {
-                info.push_str(&format!("\nfoundry.toml ({pkg}):\n{relevant}\n"));
-            }
+        // foundry.toml, whole: a key filter drops the body of a multi-line remappings array.
+        if let Ok(content) = std::fs::read_to_string(pkg_path.join("foundry.toml")) {
+            let content: String = content.chars().take(6000).collect();
+            info.push_str(&format!(
+                "\nfoundry.toml ({pkg}):\n{content}\nTests are collected only from `{pkg}/{}/`.\n",
+                test_rel.display()
+            ));
         }
     }
 

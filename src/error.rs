@@ -33,6 +33,9 @@ pub enum BulwarkError {
     #[error("Claude login failed, so the run stopped: {0}")]
     ClaudeAuth(String),
 
+    #[error("pass '{pass}' ran nothing: {reason}")]
+    NothingRan { pass: String, reason: String },
+
     #[error("config error: {0}")]
     Config(String),
 

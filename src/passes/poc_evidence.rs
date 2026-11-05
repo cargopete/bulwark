@@ -381,7 +381,19 @@ pub fn grade(
 
     let tests = match tests {
         Some(t) if !t.is_empty() => t,
-        _ => return inconclusive(vec!["no test ran".into()], true),
+        // A test function forge did not run is a harness fault; rewriting the PoC cannot fix it.
+        _ if source.contains("function test") => {
+            return inconclusive(
+                vec!["no test ran: forge collected no test from this file".into()],
+                false,
+            );
+        }
+        _ => {
+            return inconclusive(
+                vec!["no test ran: the file has no test function".into()],
+                true,
+            );
+        }
     };
     let Some(proving) = tests.iter().find(|t| t.passed && t.has_impact()) else {
         let reasons = if tests.iter().any(|t| t.passed) {
@@ -484,6 +496,21 @@ mod tests {
         t[0].attacker_gain = None;
         let g = grade("", Some(&t), &LintReport::default(), &fork());
         assert_eq!(g.status, "compiles_but_inconclusive");
+        assert!(g.retryable);
+    }
+
+    #[test]
+    fn uncollected_test_is_not_retried() {
+        let src = "contract P is Test { function test_x() public {} }";
+        let g = grade(src, Some(&[]), &LintReport::default(), &fork());
+        assert_eq!(g.status, "compiles_but_inconclusive");
+        assert!(!g.retryable);
+        let g = grade(
+            "contract P is Test {}",
+            None,
+            &LintReport::default(),
+            &fork(),
+        );
         assert!(g.retryable);
     }
 
