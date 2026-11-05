@@ -586,41 +586,97 @@ pub fn property_of<'a>(function: &str, ids: &'a [String]) -> Option<&'a String> 
 
 /// `check_` functions in a directory's .sol files, with the contract that declares each.
 fn discover_checks(dir: &Path) -> Vec<(String, String)> {
-    let mut found = Vec::new();
+    let mut decls = Vec::new();
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let p = entry.path();
         if p.extension().is_none_or(|e| e != "sol") {
             continue;
         }
         if let Ok(src) = std::fs::read_to_string(&p) {
-            found.extend(checks_in_source(&src));
+            decls.extend(contract_decls(&src));
         }
     }
-    found
+    resolve_checks(&decls)
 }
 
-fn checks_in_source(src: &str) -> Vec<(String, String)> {
+/// A contract declaration: name, whether it is abstract, its bases, its own check functions.
+#[derive(Debug, Clone, PartialEq)]
+struct Decl {
+    name: String,
+    is_abstract: bool,
+    bases: Vec<String>,
+    checks: Vec<String>,
+}
+
+fn contract_decls(src: &str) -> Vec<Decl> {
     let ident = |s: &str| -> String {
         s.chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
             .collect()
     };
-    let mut contract = String::new();
-    let mut out = Vec::new();
+    let mut out: Vec<Decl> = Vec::new();
     for line in src.lines() {
         let t = line.trim_start();
-        let decl = t
-            .strip_prefix("contract ")
-            .or_else(|| t.strip_prefix("abstract contract "));
-        if let Some(rest) = decl {
-            contract = ident(rest.trim_start());
+        let (is_abstract, rest) = match t.strip_prefix("abstract contract ") {
+            Some(r) => (true, Some(r)),
+            None => (false, t.strip_prefix("contract ")),
+        };
+        if let Some(rest) = rest {
+            let bases = rest
+                .split_once(" is ")
+                .map(|(_, b)| {
+                    b.split(['{', ','])
+                        .map(|x| ident(x.trim()))
+                        .filter(|x| !x.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.push(Decl {
+                name: ident(rest.trim_start()),
+                is_abstract,
+                bases,
+                checks: Vec::new(),
+            });
         } else if let Some(rest) = t.strip_prefix("function check_") {
-            if !contract.is_empty() {
-                out.push((contract.clone(), format!("check_{}", ident(rest))));
+            if let Some(d) = out.last_mut() {
+                d.checks.push(format!("check_{}", ident(rest)));
             }
         }
     }
     out
+}
+
+/// Halmos runs a concrete contract, so checks written in an abstract base are attributed to
+/// every concrete contract that inherits it, directly or through another base.
+fn resolve_checks(decls: &[Decl]) -> Vec<(String, String)> {
+    let by_name: BTreeMap<&str, &Decl> = decls.iter().map(|d| (d.name.as_str(), d)).collect();
+    let mut out = Vec::new();
+    for d in decls.iter().filter(|d| !d.is_abstract) {
+        let mut stack = vec![d];
+        let mut seen: Vec<&str> = Vec::new();
+        while let Some(c) = stack.pop() {
+            if seen.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen.push(&c.name);
+            for f in &c.checks {
+                if !out.contains(&(d.name.clone(), f.clone())) {
+                    out.push((d.name.clone(), f.clone()));
+                }
+            }
+            stack.extend(
+                c.bases
+                    .iter()
+                    .filter_map(|b| by_name.get(b.as_str()).copied()),
+            );
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+fn checks_in_source(src: &str) -> Vec<(String, String)> {
+    resolve_checks(&contract_decls(src))
 }
 
 fn contracts_with(checks: &[(String, String)], prefix: &str) -> Vec<String> {
@@ -1067,6 +1123,27 @@ mod tests {
             ]
         );
         assert_eq!(contracts_with(&found, "check_PV3_"), vec!["SymbolicVault"]);
+    }
+
+    #[test]
+    fn checks_in_an_abstract_base_run_on_the_contracts_that_inherit_it() {
+        let src = "abstract contract SymbolicPTMExchangeBase is Test {\n\
+                   function check_P10_roundtrip(uint a) public {}\n}\n\
+                   abstract contract Middle is SymbolicPTMExchangeBase {}\n\
+                   contract SymbolicPTMExchange6 is Middle {\n function setUp() public {}\n}\n\
+                   contract SymbolicPTMExchange18 is SymbolicPTMExchangeBase, Other {\n\
+                   function check_P10_extra() public {}\n}\n";
+        let found = checks_in_source(src);
+        assert!(
+            found
+                .iter()
+                .all(|(c, _)| c != "SymbolicPTMExchangeBase" && c != "Middle")
+        );
+        assert_eq!(
+            contracts_with(&found, "check_P10_"),
+            vec!["SymbolicPTMExchange6", "SymbolicPTMExchange18"]
+        );
+        assert!(found.contains(&("SymbolicPTMExchange18".into(), "check_P10_extra".into())));
     }
 
     #[test]
