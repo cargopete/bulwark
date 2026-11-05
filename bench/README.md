@@ -63,8 +63,10 @@ location, and the furthest stage it reached is recorded:
 
 A column in RESULTS.md counts the known bugs that reached at least that stage, so the drop
 between two columns is what that pass lost. Final findings that match no known High or Medium
-are labelled by the judge as a known Low, a plausible new defect, or invalid. Precision counts
-matches plus plausible new defects. Cost comes from `cost.json`.
+are labelled by the judge as a known Low, a duplicate (a variant of a bug the run already found),
+a plausible new defect, or invalid. Precision is taken over Medium-and-above final findings,
+leaving out duplicates, and counts matches plus plausible new defects; judged reports rarely list
+Lows, so counting them would only measure that. Cost comes from `cost.json`.
 
 ## Adding a case
 

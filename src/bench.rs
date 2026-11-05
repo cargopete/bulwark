@@ -82,6 +82,8 @@ pub struct Gates {
     pub rejected: BTreeSet<String>,
     pub discarded: BTreeSet<String>,
     pub final_ids: BTreeSet<String>,
+    /// Final severity by ID, after the review.
+    pub final_severity: BTreeMap<String, String>,
 }
 
 const TEXT_CAP: usize = 700;
@@ -200,13 +202,28 @@ pub fn collect(ws: &Workspace) -> (Vec<Candidate>, Gates) {
 
     let mut rejected = ids(read_json(&ws.rejected_findings()));
     rejected.extend(ids(read_json(&ws.known_duplicates())));
-    let final_ids =
-        ids(read_json(&ws.root().join("final-report.json"))
-            .and_then(|r| r.get("findings").cloned()));
+    let finals =
+        read_json(&ws.root().join("final-report.json")).and_then(|r| r.get("findings").cloned());
+    let final_severity: BTreeMap<String, String> = finals
+        .as_ref()
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            Some((
+                f.get("id")?.as_str()?.to_string(),
+                f.get("severity")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            ))
+        })
+        .collect();
     let gates = Gates {
         rejected,
         discarded: ids(read_json(&ws.discarded_findings())),
-        final_ids,
+        final_ids: ids(finals),
+        final_severity,
     };
     (cands, gates)
 }
@@ -285,11 +302,12 @@ pub fn judge_prompt(
          ## Candidates\n{list}\n\
          ## Output\n\
          {{\"matches\": {{\"<known id>\": [\"<candidate key>\", ...]}}, \
-         \"unmatched\": {{\"<final id>\": \"known_low\" | \"plausible_new\" | \"invalid\"}}}}\n\n\
+         \"unmatched\": {{\"<final id>\": \"known_low\" | \"duplicate\" | \"plausible_new\" | \"invalid\"}}}}\n\n\
          List every known id under `matches`, with an empty array when nothing matches. Under \
          `unmatched`, label each of these final findings that matches no High or Medium: {finals:?}. \
-         `known_low` if it matches an issue in the Low list, `plausible_new` if it describes a real \
-         defect the contest missed, `invalid` otherwise.\n"
+         `known_low` if it matches an issue in the Low list, `duplicate` if it is a variant of a \
+         known finding another candidate already matches (same root cause, another entry point), \
+         `plausible_new` if it describes a real defect the contest missed, `invalid` otherwise.\n"
     )
 }
 
@@ -431,10 +449,31 @@ pub async fn score(a: ScoreArgs<'_>) -> Result<Value> {
             (c.key.clone(), label)
         })
         .collect();
-    let plausible = unmatched_labels
-        .values()
-        .filter(|l| *l == "plausible_new")
+    // Judged reports rarely list Lows, so precision counts Medium and above, and a variant of a
+    // bug the run already found is neither a hit nor a miss.
+    let label = |c: &Candidate| unmatched_labels.get(&c.key).map(String::as_str);
+    let counted: Vec<&Candidate> = final_cands
+        .iter()
+        .copied()
+        .filter(|c| {
+            let sev = gates
+                .final_severity
+                .get(&c.key)
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+            !sev.starts_with("low") && !sev.starts_with("info")
+        })
+        .filter(|c| label(c) != Some("duplicate"))
+        .collect();
+    let plausible = counted
+        .iter()
+        .filter(|c| label(c) == Some("plausible_new"))
         .count();
+    let tp_counted = counted
+        .iter()
+        .filter(|c| matched_finals.contains(&c.key))
+        .count();
+    let n_counted = counted.len();
     let n_final = final_cands.len();
     let tp_final = matched_finals.len();
     let cost = run_cost(&ws);
@@ -448,7 +487,8 @@ pub async fn score(a: ScoreArgs<'_>) -> Result<Value> {
         "recall_final": reached.get("final").copied().unwrap_or(0) as f64 / total,
         "final_findings": n_final,
         "final_true_positives": tp_final,
-        "precision_final": if n_final == 0 { Value::Null } else { json!((tp_final + plausible) as f64 / n_final as f64) },
+        "final_findings_medium_plus": n_counted,
+        "precision_final": if n_counted == 0 { Value::Null } else { json!((tp_counted + plausible) as f64 / n_counted as f64) },
         "unmatched_final": unmatched_labels,
         "cost_usd": cost,
         "cost_per_true_positive": if tp_final == 0 { Value::Null } else { json!(cost / tp_final as f64) },
@@ -514,6 +554,7 @@ mod tests {
             rejected: ["F-002".into()].into(),
             discarded: ["F-003".into()].into(),
             final_ids: ["F-004".into()].into(),
+            ..Default::default()
         };
         let c = |k| cand(k, Kind::Merged);
         assert_eq!(stage_of(&[&c("F-002")], &gates), Stage::Merged);
