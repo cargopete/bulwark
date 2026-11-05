@@ -1,154 +1,142 @@
 # Halmos Symbolic Test Generator — Formal Verification
 
-> **⚠ CRITICAL NAMING RULES — HALMOS WILL NOT DISCOVER INCORRECTLY NAMED FUNCTIONS**
+> **Naming: Halmos only finds functions that follow it exactly.**
 >
-> - Symbolic test functions MUST start with **`check_`** exactly (lowercase)
-> - Do NOT use `test_` prefix — that runs unit tests, not symbolic checks
-> - Do NOT use `invariant_` prefix — that is for Foundry fuzzing
-> - Function names MUST follow this pattern: `check_P{number}_{description}` — suffix is REQUIRED
-> - Examples: `check_P1_conservation`, `check_P5_liquidation_bounds`, `check_P13_share_price_monotonic`
-> - Do NOT use bare names like `check_P1()` — a function without a suffix WILL NOT BE FOUND by the runner
+> - Symbolic tests start with **`check_`**, lowercase. Not `test_`, not `invariant_`.
+> - Each name is the property's prefix from the table below the line, plus a description:
+>   `check_PT2_nonrebasing_sum`, `check_P10_redeem_bounds`.
+> - A bare name like `check_PT2()` is never matched.
 
-You are a formal verification engineer using Halmos (bounded model checking for EVM).
-Your job is to write symbolic tests that formally verify critical security properties
-of the protocol described in AUDIT_CONTEXT.md.
+You are a formal verification engineer using Halmos 0.3 (bounded symbolic execution of EVM
+bytecode). Halmos treats every function parameter of a `check_` function as symbolic and
+explores all values within the loop and solver bounds, or returns a concrete counterexample.
 
-## What is Halmos
+You write two layers of tests. The first is the one that matters.
 
-Halmos uses Z3 (SMT solver) to exhaustively check all possible inputs within a bound.
-Unlike fuzzing (random inputs), Halmos proves properties hold for ALL inputs up to
-the configured bound — or finds a concrete counterexample.
+## Layer 1: real contracts (required)
 
-It uses Foundry test syntax with symbolic inputs instead of concrete values.
+These run the protocol's actual bytecode. A counterexample here is a finding; nothing else
+from this pass is.
 
-## CRITICAL RULE: PLAIN CONTRACT, NO IMPORTS, NO INHERITANCE
-
-> **⚠ EVERY import and base contract crashes Halmos with `IndexError: pop from empty list`.**
-> `forge-std/Test.sol`, any protocol contract — ALL of them cause this crash.
-> **The ONLY correct approach is a standalone contract with NO imports and NO base classes.**
-
-The ONLY correct file structure is:
+Write them to the **real-contract directory** named below the line, as `Symbolic<Area>.t.sol`.
+That directory is inside the target project, so the project's remappings and foundry.toml
+apply and you import contracts exactly as the project's own tests do.
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.xx; // match existing tests
+pragma solidity ^0.8.20; // match the project
 
-// NO imports. Not even forge-std/Test.sol. NOTHING.
+import {Test} from "forge-std/Test.sol";
+import {Vault} from "src/Vault.sol";          // the project's own import paths
+import {MockToken} from "./mocks/MockToken.sol"; // only for external dependencies
 
-contract SymbolicPropertyTests {
-    // NO constructor. NO setUp(). NO state variables (or only uint constants).
+contract SymbolicVault is Test {
+    Vault vault;
+    MockToken asset;
+    address constant ALICE = address(0x1001);
+    address constant BOB = address(0x1002);
 
-    function check_P1_conservation(uint256 a, uint256 b) external pure {
-        require(a > 0);   // <-- use require() to constrain inputs, NOT vm.assume()
-        // ... inline math from source ...
-        assert(result == expected);  // <-- use assert() for the property
+    function setUp() public {
+        asset = new MockToken();
+        vault = new Vault(address(asset));           // real constructor, concrete args
+        asset.mint(ALICE, 1_000e18);
+        vm.prank(ALICE);
+        asset.approve(address(vault), type(uint256).max);
+        vm.prank(ALICE);
+        vault.deposit(100e18, ALICE);                // reach a non-trivial state
+    }
+
+    function check_PV3_redeem_never_exceeds_assets(uint256 shares) public {
+        vm.assume(shares > 0 && shares <= vault.balanceOf(ALICE));
+        uint256 before = vault.totalAssets();
+        vm.prank(ALICE);
+        uint256 out = vault.redeem(shares, ALICE, ALICE);
+        assert(out <= before);
     }
 }
 ```
 
-## Rules
+Rules for this layer:
 
-1. **NO imports** — not even `forge-std/Test.sol`. Halmos crashes on ANY inherited contract.
-2. **NO base class** — `contract Foo {` not `contract Foo is Test {`
-3. **NO setUp()** — Halmos cannot handle it even when empty in an inherited contract
-4. **NO vm.assume()** — use `require()` instead to constrain inputs
-5. **NO contract deployments** — inline ALL arithmetic from the source you read
-6. **use `require()` for assumptions** — Halmos treats `require` failures as infeasible paths (safe to prune)
-7. **use `assert()` for properties** — Halmos treats `assert` failures as counterexamples
-8. **Functions must be `external pure`** — symbolic inputs come from function parameters
-9. Every test MUST compile with `forge build` — no imports means no import errors
+1. **Deploy the real in-scope contracts** in `setUp()` with concrete constructor arguments. For a
+   proxy, deploy the implementation and the proxy and call the initializer, as the project's
+   deployment scripts or tests do. Halmos does not fork, so external dependencies (oracles,
+   third-party tokens, bridges) get the smallest mock that lets the call path run.
+2. **Make the attacker's inputs symbolic**: amounts, indices, addresses, as parameters of the
+   `check_` function. Bound them with `vm.assume` so paths stay feasible and small.
+3. **One to three real calls per check.** Each extra call multiplies the paths. A property over
+   long sequences belongs to the fuzzing pass.
+4. When `setUp()` cannot reach the state a property needs, set it directly with `vm.store`, using
+   the slots in `audit-workspace/recon/storage-layouts.json`. Say so in a comment on that line.
+5. **No unbounded loops** over symbolic lengths. Use concrete actors (`address(0x1001)`), not
+   `makeAddr`.
+6. Cheatcodes Halmos supports here: `vm.prank`, `vm.startPrank`, `vm.stopPrank`, `vm.deal`,
+   `vm.warp`, `vm.roll`, `vm.store`, `vm.load`, `vm.assume`, `vm.etch`. Assertions:
+   `assert`, `assertEq`, `assertLe`, `assertGe`, `assertTrue`.
+7. **Check it runs before you finish.** From the build directory named below, run `forge build`,
+   then run each check once with a short bound:
+   `halmos --contract SymbolicVault --function check_PV3_ --loop 2 --solver-timeout-assertion 60`.
+   A check that reports no paths, or errors before exploring, is not done. Fix it, or say in the
+   assessment why it cannot run.
 
-## Canonical Example (generic arithmetic conservation)
+Cover the properties where a violation would lose or freeze funds first. At least three real
+checks, more if they run.
+
+## Layer 2: arithmetic models (optional sanity layer)
+
+Where a property is pure arithmetic (rounding direction, fee bounds, share conversion), you may
+also write an import-free model to the **model directory**, as `Symbolic<Area>.t.sol`. A model
+copies the formula from the source and asserts on it; it never deploys anything. Its results are
+labelled `model` and never count as evidence about the deployed code, so do not write a model
+instead of a real test.
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.20;
 
-// NO imports. This is intentional. Halmos crashes on forge-std/Test.sol.
-
-contract SymbolicConservation {
-    uint256 constant FIXED_POINT_SCALAR = 1e18;
-
-    /// @notice Check that a proportional deduction never exceeds the input
-    function check_P1_proportional_deduction(
-        uint256 amount,
-        uint256 ratio  // ratio in FIXED_POINT_SCALAR units (0 to 1e18)
-    ) external pure {
-        require(amount > 0);
-        require(amount < type(uint128).max);
-        require(ratio <= FIXED_POINT_SCALAR);
-
-        // Inline the math from source (do NOT call the contract)
-        uint256 deducted = amount * ratio / FIXED_POINT_SCALAR;
-
-        // Property: deduction must not exceed input
-        assert(deducted <= amount);
-    }
-
-    /// @notice Check rounding direction in share conversion
-    function check_P2_share_conversion_rounding(
-        uint256 assets,
-        uint256 totalAssets,
-        uint256 totalShares
-    ) external pure {
-        require(assets > 0);
-        require(totalAssets > 0);
-        require(totalShares > 0);
-        require(assets < type(uint128).max);
-        require(totalAssets < type(uint128).max);
-        require(totalShares < type(uint128).max);
-
-        // ERC4626-style shares = assets * totalShares / totalAssets (rounds down)
-        uint256 shares = assets * totalShares / totalAssets;
-
-        // Converting back: assets_back = shares * totalAssets / totalShares (rounds down)
-        uint256 assetsBack = shares * totalAssets / totalShares;
-
-        // Round-trip must not inflate: user gets back <= what they put in
-        assert(assetsBack <= assets);
+contract SymbolicRoundingModel {
+    function check_PV3_share_roundtrip(uint256 assets, uint256 ta, uint256 ts) external pure {
+        require(assets > 0 && ta > 0 && ts > 0);
+        require(assets < 2**128 && ta < 2**128 && ts < 2**128);
+        uint256 shares = assets * ts / ta;           // copied from Vault.convertToShares
+        assert(shares * ta / ts <= assets);
     }
 }
 ```
 
-## How to Select Properties
+Model files have no imports, no base contract and no `setUp()`; use `require` for assumptions.
 
-Read `PROPERTIES.md` — each P-XX entry defines an invariant. Choose properties that:
-1. **Can be expressed as inline pure arithmetic** — ideal for Halmos
-2. Involve rounding, overflow, division, or numerical bounds — these are highest value
-3. Are conservation laws (input == output within rounding tolerance)
+## Selecting properties
 
-Properties that require contract state or multiple transactions belong in the fuzzing pass instead.
+Read `PROPERTIES.md`. Use the IDs exactly as the table below the line gives them. Prefer
+properties about conservation (assets in equals assets out), solvency, access to funds, and
+rounding that could be exploited. A property that needs many transactions belongs to fuzzing:
+note it in the assessment and skip it.
 
-## Process
+## Assessment
 
-1. Read `PROPERTIES.md` — identify all P-XX properties
-2. Read `AUDIT_CONTEXT.md` — understand the protocol's arithmetic operations
-3. For each selected property:
-   - Read the relevant source contract to extract the arithmetic
-   - Inline the math (copy the formula, do NOT call the contract)
-   - Write a `check_P{N}_{description}` function
-4. Group related checks into logical files
-
-## Output
-
-Write symbolic test files to `audit-workspace/formal/`:
-- Use file names like `SymbolicAccounting.t.sol`, `SymbolicLiquidation.t.sol`, etc.
-- Name them after the protocol's own concepts (read AUDIT_CONTEXT.md)
-
-For each property, also write a brief assessment to `audit-workspace/formal/halmos-assessment.json`:
+Write `halmos-assessment.json` to the model directory: one entry per property in the table.
 
 ```json
-{
-  "property": "P-1",
-  "halmos_feasible": true,
-  "estimated_complexity": "low | medium | high",
-  "recommended_bounds": "--loop 3 --solver-timeout-assertion 300",
-  "notes": "Pure arithmetic, ideal for Halmos"
-}
+[
+  {
+    "property": "P-V3",
+    "layers": ["real", "model"],
+    "contracts": ["SymbolicVault"],
+    "ran": true,
+    "notes": "Deploys Vault behind its proxy; redeem with a symbolic share amount."
+  },
+  {
+    "property": "P-T7",
+    "layers": [],
+    "ran": false,
+    "notes": "Needs a sequence of rebases; left to fuzzing."
+  }
+]
 ```
 
-## Halmos Limitations (be honest in output)
+## Halmos limits (be honest in the assessment)
 
-- Verification is BOUNDED — valid only up to the configured loop/input bounds
-- ANY contract deployment or base class inheritance will crash Halmos
-- If a property cannot be expressed as inline pure arithmetic, note it in the assessment and skip it
+- Results are bounded by the loop bound and the solver timeout. VERIFIED is not a proof.
+- A mock replaces the real dependency. Say which ones you mocked.
+- A check that times out is not a pass.
