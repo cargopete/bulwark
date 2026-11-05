@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::passes::fuzz_tools::{self, Failure, Fork, PREFIX, TESTER, ToolRun};
 use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
 use console::style;
@@ -7,11 +8,10 @@ use std::path::Path;
 
 /// Pass 4: Fuzzing Campaign.
 ///
-/// 1. Claude generates invariant tests from PROPERTIES.md
-/// 2. Foundry runs invariant tests
-/// 3. Medusa extended fuzzing (if available)
-/// 4. Echidna extended fuzzing (if available)
-/// 5. Broken invariants become findings
+/// 1. Claude generates one suite from PROPERTIES.md that all three fuzzers run
+/// 2. Forge runs it, on fork state when the config pins a fork
+/// 3. Medusa and Echidna run it side by side, deploying `CryticTester`
+/// 4. Each broken invariant is classified; only real violations become findings
 pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let fuzz_dir = ctx.workspace.fuzzing_dir();
     let invariant_dir = fuzz_dir.join("invariant-tests");
@@ -22,7 +22,6 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     std::fs::create_dir_all(&logs_dir)?;
 
     let forge_bin = ctx.config.resolve_tool("forge")?;
-    let fuzz_runs = ctx.config.passes.fuzzing.fuzz_runs;
 
     // ── Step 1: Generate invariant tests ─────────────────────────────
     // Clear stale files from previous runs before generating fresh ones.
@@ -105,160 +104,420 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             .unwrap_or(&test_root)
             .display()
     );
-    let tests_exist = true;
+    let suite_rel = forge_test_dir
+        .strip_prefix(&build_dir)
+        .unwrap_or(&forge_test_dir)
+        .display()
+        .to_string();
+    let fork = fork_target(ctx);
+    if let Some(f) = &fork {
+        eprintln!("  Fuzzing on fork state at block {}", f.block);
+    }
+    let cfg = &ctx.config.passes.fuzzing;
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
 
-    // ── Step 3: Foundry invariant tests ─────────────────────────────
-    let mut all_findings: Vec<Value> = Vec::new();
-    let mut foundry_passed = 0u32;
-    let mut foundry_failed = 0u32;
+    // ── Step 3: Forge ───────────────────────────────────────────────
+    eprintln!(
+        "  Forge invariant tests (runs={}, depth={})...",
+        cfg.invariant_runs, cfg.invariant_depth
+    );
+    let forge = forge_bin.to_str().unwrap_or("forge");
+    let runs_env = format!("FOUNDRY_INVARIANT_RUNS={}", cfg.invariant_runs);
+    let depth_env = format!("FOUNDRY_INVARIANT_DEPTH={}", cfg.invariant_depth);
+    // Only the Foundry entry: Forge would also run CryticTester's bool properties and ignore `false`.
+    let match_path = format!("{suite_rel}/*.t.sol");
+    let block_str = fork
+        .as_ref()
+        .map(|f| f.block.to_string())
+        .unwrap_or_default();
+    let mut args: Vec<&str> = vec![
+        &runs_env,
+        &depth_env,
+        forge,
+        "test",
+        "--match-path",
+        &match_path,
+        "--match-test",
+        PREFIX,
+        "-vvv",
+    ];
+    if let Some(f) = &fork {
+        args.extend([
+            "--fork-url",
+            f.rpc.as_str(),
+            "--fork-block-number",
+            block_str.as_str(),
+        ]);
+    }
+    let output = crate::tools::run_command("env", &args, &build_dir).await?;
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::write(results_dir.join("foundry-invariant.log"), &combined);
+    let forge_run = fuzz_tools::parse_forge(&combined);
+    eprintln!(
+        "    Forge: {} passed, {} failed",
+        forge_run.passed, forge_run.failed
+    );
+    if forge_run.executed() == 0 {
+        return Err(nothing_ran(
+            "forge ran no invariant test; see foundry-invariant.log",
+        ));
+    }
 
-    if tests_exist {
-        eprintln!("  Running Foundry invariant tests (fuzz-runs={fuzz_runs})...");
-
-        let fuzz_runs_str = fuzz_runs.to_string();
-        let output = crate::tools::run_command(
-            forge_bin.to_str().unwrap_or("forge"),
-            &[
-                "test",
-                "--match-test",
-                "invariant_",
-                "--fuzz-runs",
-                &fuzz_runs_str,
-                "-vvv",
-            ],
-            &build_dir,
-        )
-        .await?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined = format!("{stdout}\n{}", String::from_utf8_lossy(&output.stderr));
-        let _ = std::fs::write(results_dir.join("foundry-invariant.log"), &combined);
-
-        foundry_passed = combined.matches("[PASS]").count() as u32;
-        foundry_failed = combined.matches("[FAIL]").count() as u32;
-
+    // ── Step 4: Medusa, then Echidna ────────────────────────────────
+    // One after the other: each compiles through crytic-compile, which starts with `forge clean`.
+    let corpus = fuzz_dir.join("corpus");
+    let (medusa_run, echidna_run) = if !find_contract(&forge_test_dir, TESTER) {
+        let note = format!("suite has no {TESTER} contract");
         eprintln!(
-            "  Foundry: {} passed, {} failed",
-            foundry_passed, foundry_failed
+            "  {} Medusa and Echidna skipped: {note}",
+            style("⚠").yellow()
         );
-        if foundry_passed + foundry_failed == 0 {
-            return Err(nothing_ran(
-                "forge ran no invariant test; see foundry-invariant.log",
-            ));
-        }
-
-        // Extract broken invariants as findings
-        if foundry_failed > 0 {
-            eprintln!("  {} Broken invariants detected!", style("⚠").yellow());
-            let mut idx = 1;
-            for line in combined.lines() {
-                if line.contains("[FAIL]") {
-                    if let Some(finding) = parse_foundry_failure(line, idx) {
-                        all_findings.push(finding);
-                        idx += 1;
-                    }
-                }
-            }
-        }
+        (skipped("medusa", &note), skipped("echidna", &note))
     } else {
-        eprintln!("  {} No invariant tests to run", style("⚠").yellow());
-    }
-
-    // ── Step 4: Medusa (optional) ───────────────────────────────────
-    if tests_exist && ctx.config.has_tool("medusa") {
-        let medusa_bin = ctx.config.resolve_tool("medusa")?;
-        let timeout_str = ctx.config.passes.fuzzing.medusa_timeout.to_string();
-        eprintln!("  Running Medusa extended fuzzing (timeout={timeout_str}s)...");
-
-        let output = crate::tools::run_command(
-            medusa_bin.to_str().unwrap_or("medusa"),
-            &[
-                "fuzz",
-                "--target-contracts",
-                "Invariant",
-                "--timeout",
-                &timeout_str,
-            ],
+        let m = run_medusa(
+            ctx,
             &build_dir,
+            &corpus,
+            &results_dir,
+            workers,
+            fork.as_ref(),
         )
-        .await?;
-
-        let combined = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let _ = std::fs::write(results_dir.join("medusa.log"), &combined);
-
-        let has_failures = combined.to_lowercase().contains("failed")
-            || combined.to_lowercase().contains("broken")
-            || combined.to_lowercase().contains("violated");
-
-        if has_failures {
-            eprintln!(
-                "  {} Medusa found broken invariants — see medusa.log",
-                style("⚠").yellow()
-            );
-        } else {
-            eprintln!("  {} Medusa: all invariants held", style("✓").green());
-        }
-    } else if tests_exist {
-        eprintln!("  Medusa not installed — skipping extended fuzzing");
-    }
-
-    // ── Step 5: Echidna (optional) ──────────────────────────────────
-    if tests_exist && ctx.config.has_tool("echidna") {
-        let echidna_bin = ctx.config.resolve_tool("echidna")?;
-        let limit_str = ctx.config.passes.fuzzing.echidna_limit.to_string();
-        eprintln!("  Running Echidna (test-limit={limit_str})...");
-
-        let output = crate::tools::run_command(
-            echidna_bin.to_str().unwrap_or("echidna"),
-            &[
-                ".",
-                "--contract",
-                "CryticTester",
-                "--test-limit",
-                &limit_str,
-            ],
+        .await;
+        let e = run_echidna(
+            ctx,
             &build_dir,
+            &corpus,
+            &results_dir,
+            workers,
+            fork.as_ref(),
         )
-        .await?;
-
-        let combined = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let _ = std::fs::write(results_dir.join("echidna.log"), &combined);
-
-        let has_failures = combined.to_lowercase().contains("failed")
-            || combined.to_lowercase().contains("falsified");
-
-        if has_failures {
-            eprintln!(
-                "  {} Echidna found broken properties — see echidna.log",
-                style("⚠").yellow()
-            );
-        } else {
-            eprintln!("  {} Echidna: all properties held", style("✓").green());
+        .await;
+        (m, e)
+    };
+    for r in [&medusa_run, &echidna_run] {
+        match &r.note {
+            Some(n) => eprintln!("    {} {}: {n}", style("⚠").yellow(), r.tool),
+            None => eprintln!("    {}: {} passed, {} failed", r.tool, r.passed, r.failed),
         }
-    } else if tests_exist {
-        eprintln!("  Echidna not installed — skipping");
     }
-
-    // ── Write findings ──────────────────────────────────────────────
+    let runs = [forge_run, medusa_run, echidna_run];
     write_json(
-        &fuzz_dir.join("fuzzing-findings.json"),
-        &Value::Array(all_findings.clone()),
+        &fuzz_dir.join("tool-runs.json"),
+        &serde_json::to_value(&runs)?,
     )?;
 
+    // ── Step 5: Classify every broken invariant ─────────────────────
+    let broken = group_failures(&runs);
+    let mut classifications = Vec::new();
+    let mut findings: Vec<Value> = Vec::new();
+    if !broken.is_empty() {
+        eprintln!(
+            "  {} {} broken invariant(s); classifying...",
+            style("⚠").yellow(),
+            broken.len()
+        );
+    }
+    for (name, failures) in &broken {
+        let class = classify(ctx, name, failures, &forge_test_dir, &logs_dir).await;
+        eprintln!("    {name}: {} ({})", class.class, class.tools.join(", "));
+        if class.class == "real_violation" {
+            findings.push(finding(findings.len() + 1, name, failures, &class));
+        }
+        classifications.push(class);
+    }
+    write_json(
+        &fuzz_dir.join("invariant-classification.json"),
+        &serde_json::to_value(&classifications)?,
+    )?;
+    write_json(
+        &fuzz_dir.join("fuzzing-findings.json"),
+        &Value::Array(findings.clone()),
+    )?;
+
+    let [f, m, e] = &runs;
     Ok(format!(
-        "foundry: {} passed / {} failed, {} fuzzing findings",
-        foundry_passed,
-        foundry_failed,
-        all_findings.len()
+        "forge {}/{}, medusa {}/{}, echidna {}/{} passed/failed; {} broken, {} real violation(s)",
+        f.passed,
+        f.failed,
+        m.passed,
+        m.failed,
+        e.passed,
+        e.failed,
+        broken.len(),
+        findings.len()
     ))
+}
+
+fn fork_target(ctx: &PipelineContext) -> Option<Fork> {
+    let poc = &ctx.config.passes.poc;
+    let rpc = std::env::var(poc.fork_rpc_env.as_deref()?).ok()?;
+    Some(Fork {
+        rpc,
+        block: poc.fork_block?,
+    })
+}
+
+fn skipped(tool: &'static str, note: &str) -> ToolRun {
+    ToolRun {
+        tool,
+        note: Some(note.to_string()),
+        ..Default::default()
+    }
+}
+
+fn find_contract(dir: &Path, name: &str) -> bool {
+    let needle = format!("contract {name}");
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(&needle)))
+}
+
+/// Run a fuzzer under a hard wall-clock cap a little past its own timeout.
+async fn run_capped(bin: &Path, args: &[&str], dir: &Path, timeout_s: u64, log: &Path) -> String {
+    let cap = (timeout_s + 300).to_string();
+    let mut full = vec![cap.as_str(), bin.to_str().unwrap_or_default()];
+    full.extend_from_slice(args);
+    let combined = match crate::tools::run_command("timeout", &full, dir).await {
+        Ok(o) => format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        ),
+        Err(e) => format!("could not start: {e}"),
+    };
+    let _ = std::fs::write(log, &combined);
+    combined
+}
+
+/// A fuzzer that executed nothing is a fault to see, not a clean result.
+fn no_tests(mut r: ToolRun, log: &Path) -> ToolRun {
+    if r.executed() == 0 && r.note.is_none() {
+        r.note = Some(format!("ran no test; see {}", log.display()));
+    }
+    r
+}
+
+async fn run_medusa(
+    ctx: &PipelineContext,
+    build_dir: &Path,
+    corpus: &Path,
+    results: &Path,
+    workers: usize,
+    fork: Option<&Fork>,
+) -> ToolRun {
+    let Ok(bin) = ctx.config.resolve_tool("medusa") else {
+        return skipped("medusa", "not installed");
+    };
+    let timeout_s = ctx.config.passes.fuzzing.medusa_timeout;
+    let config = results.join("medusa.json");
+    let cfg =
+        fuzz_tools::medusa_config(build_dir, &corpus.join("medusa"), timeout_s, workers, fork);
+    if std::fs::write(
+        &config,
+        serde_json::to_string_pretty(&cfg).unwrap_or_default(),
+    )
+    .is_err()
+    {
+        return skipped("medusa", "could not write medusa.json");
+    }
+    eprintln!("  Medusa (timeout={timeout_s}s, workers={workers})...");
+    let log = results.join("medusa.log");
+    let cfg_path = config.to_string_lossy().into_owned();
+    let out = run_capped(
+        &bin,
+        &["fuzz", "--config", &cfg_path],
+        build_dir,
+        timeout_s,
+        &log,
+    )
+    .await;
+    no_tests(fuzz_tools::parse_medusa(&out), &log)
+}
+
+async fn run_echidna(
+    ctx: &PipelineContext,
+    build_dir: &Path,
+    corpus: &Path,
+    results: &Path,
+    workers: usize,
+    fork: Option<&Fork>,
+) -> ToolRun {
+    let Ok(bin) = ctx.config.resolve_tool("echidna") else {
+        return skipped("echidna", "not installed");
+    };
+    let cfg = &ctx.config.passes.fuzzing;
+    let timeout_s = cfg.medusa_timeout;
+    let config = results.join("echidna.yaml");
+    let yaml = fuzz_tools::echidna_config(
+        &corpus.join("echidna"),
+        cfg.echidna_limit,
+        timeout_s,
+        workers,
+        fork,
+    );
+    if std::fs::write(&config, yaml).is_err() {
+        return skipped("echidna", "could not write echidna.yaml");
+    }
+    eprintln!(
+        "  Echidna (testLimit={}, timeout={timeout_s}s, workers={workers})...",
+        cfg.echidna_limit
+    );
+    let log = results.join("echidna.log");
+    let cfg_path = config.to_string_lossy().into_owned();
+    let out = run_capped(
+        &bin,
+        &[".", "--contract", TESTER, "--config", &cfg_path],
+        build_dir,
+        timeout_s,
+        &log,
+    )
+    .await;
+    no_tests(fuzz_tools::parse_echidna(&out), &log)
+}
+
+/// Failures keyed by invariant name across tools; all three run the same properties.
+fn group_failures(runs: &[ToolRun]) -> Vec<(String, Vec<Failure>)> {
+    let mut by_name: std::collections::BTreeMap<String, Vec<Failure>> = Default::default();
+    for r in runs {
+        for f in &r.failures {
+            by_name
+                .entry(f.invariant.clone())
+                .or_default()
+                .push(f.clone());
+        }
+    }
+    by_name.into_iter().collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Classification {
+    invariant: String,
+    #[serde(default)]
+    tools: Vec<String>,
+    /// wrong_invariant, handler_precondition, real_violation, or unclassified
+    class: String,
+    reason: String,
+}
+
+const CLASSES: [&str; 3] = ["wrong_invariant", "handler_precondition", "real_violation"];
+
+fn read_classification(
+    path: &Path,
+    invariant: &str,
+) -> std::result::Result<Classification, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let c: Classification =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    if c.invariant != invariant {
+        return Err(format!("verdict is for {}, not {invariant}", c.invariant));
+    }
+    if !CLASSES.contains(&c.class.as_str()) {
+        return Err(format!("unknown class {}", c.class));
+    }
+    Ok(c)
+}
+
+async fn classify(
+    ctx: &PipelineContext,
+    invariant: &str,
+    failures: &[Failure],
+    suite: &Path,
+    logs_dir: &Path,
+) -> Classification {
+    let tools: Vec<String> = failures.iter().map(|f| f.tool.to_string()).collect();
+    let unclassified = |reason: String| Classification {
+        invariant: invariant.to_string(),
+        tools: tools.clone(),
+        class: "unclassified".into(),
+        reason,
+    };
+    let Ok(claude_bin) = ctx.config.resolve_tool("claude") else {
+        return unclassified("claude not available".into());
+    };
+    let verdict_dir = ctx.workspace.fuzzing_dir().join("classification");
+    let _ = std::fs::create_dir_all(&verdict_dir);
+    let verdict = verdict_dir.join(format!("{invariant}.json"));
+    let _ = std::fs::remove_file(&verdict);
+    let evidence = serde_json::to_string_pretty(failures).unwrap_or_default();
+    let prompt = format!(
+        "A fuzzer broke the invariant `{invariant}`. Decide why, from the code, and write one \
+         verdict file.\n\n\
+         The suite is in `{suite}`. The property is defined there (search for `{invariant}`), and \
+         the calls in each sequence are `CryticTester` target functions. Read the property, every \
+         handler the sequence goes through, and the protocol code they reach.\n\n\
+         ## Failures (tool, reason, call sequence)\n```json\n{evidence}\n```\n\n\
+         ## Classes\n\
+         - `wrong_invariant`: the property is false by design; it states something the protocol \
+           never promised. Cite the code or docs that show it.\n\
+         - `handler_precondition`: the sequence is unreachable for real users, because a handler \
+           skipped a check the real entry point enforces, pranked a role an attacker cannot hold, \
+           or set state directly.\n\
+         - `real_violation`: an unprivileged sequence through real entry points breaks a property \
+           the protocol does promise.\n\
+         Prefer the first two when in doubt; a real violation must survive a hostile reviewer.\n\n\
+         Write exactly this JSON to `{verdict}`:\n\
+         {{\"invariant\": \"{invariant}\", \"tools\": {tools:?}, \"class\": \"...\", \"reason\": \"two sentences\"}}\n\n\
+         Only that file is read; your final message is not.",
+        suite = suite.display(),
+        verdict = verdict.display(),
+    );
+    let session = ClaudeSession {
+        claude_bin,
+        prompt,
+        max_turns: 40,
+        working_dir: ctx.audit_dir.clone(),
+        log_file: logs_dir.join(format!("classify-{invariant}.log")),
+        model: Some(ctx.config.model_for("fuzzing")),
+        allowed_tools: ["Read", "Grep", "Glob", "Write"].map(String::from).to_vec(),
+        timeout_minutes: Some(15),
+        label: format!("fuzz-classify:{invariant}"),
+        budget_usd: ctx.allowance("fuzzing").split(1),
+        ledger: Some(ctx.ledger.clone()),
+        resume: None,
+    };
+    let _ = session
+        .run_with_spinner(&format!("Classifying {invariant}..."))
+        .await;
+    read_classification(&verdict, invariant)
+        .unwrap_or_else(|e| unclassified(format!("no usable verdict: {e}")))
+}
+
+fn finding(idx: usize, invariant: &str, failures: &[Failure], class: &Classification) -> Value {
+    let seed = failures.iter().max_by_key(|f| f.sequence.len()).cloned();
+    let prop_id = invariant
+        .strip_prefix(PREFIX)
+        .and_then(|rest| rest.split('_').next())
+        .filter(|p| p.starts_with('P') && p.len() > 1)
+        .map(|p| format!("P-{}", &p[1..]));
+    json!({
+        "id": format!("FUZZ-{idx:03}"),
+        "source": "fuzzer",
+        "severity": "High",
+        "confidence": "Medium",
+        "title": format!("Fuzzer broke {invariant}"),
+        "contract": "multiple",
+        "function": invariant,
+        "lines": [],
+        "property_violated": prop_id,
+        "attack_scenario": format!(
+            "{} broke {invariant} ({}). Classified as a real violation: {}",
+            class.tools.join(", "),
+            seed.as_ref().map(|f| f.reason.as_str()).unwrap_or(""),
+            class.reason
+        ),
+        "call_sequence": seed.map(|f| f.sequence).unwrap_or_default(),
+        "poc_file": null,
+        "poc_status": "compiles_but_inconclusive",
+        "dedup_hash": ""
+    })
 }
 
 const MAX_COMPILE_REPAIRS: usize = 2;
@@ -326,10 +585,20 @@ async fn generate_invariant_tests(
     };
 
     let test_infra = super::scan_test_infrastructure(ctx);
+    let mode = match fork_target(ctx) {
+        Some(f) => format!(
+            "All three fuzzers run on a fork of the live chain at block {}. In the setup, attach to \
+             the deployed contracts at their real addresses (AUDIT_CONTEXT.md lists them); do not \
+             deploy fresh copies. Fund actors by pranking a real holder and transferring.",
+            f.block
+        ),
+        None => "No fork is configured: the setup deploys the protocol locally.".to_string(),
+    };
 
     let prompt = format!(
         "{base_prompt}\n\n---\n\n\
          ## IMPORTANT: No bash available. Just write files. The pipeline compiles them.\n\n\
+         ## Chain state\n\n{mode}\n\n\
          ## Project Build Infrastructure\n\n\
          {test_infra}\n\n\
          ## Output Directory\n\n\
@@ -473,53 +742,6 @@ pub fn patch_missing_remappings(build_dir: &Path, stderr: &str) -> usize {
     added
 }
 
-fn parse_foundry_failure(line: &str, idx: usize) -> Option<Value> {
-    // Extract test name from [FAIL. Reason: ...] invariant_Xxx()
-    let test_name = line
-        .split_whitespace()
-        .find(|w| w.starts_with("invariant_") || w.starts_with("test_"))?
-        .trim_end_matches('(')
-        .trim_end_matches(')');
-
-    // Extract property number if present
-    let prop_id = if let Some(pos) = test_name.find('P') {
-        let rest = &test_name[pos + 1..];
-        let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if !num.is_empty() {
-            Some(format!("P-{num}"))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract reason
-    let reason = line
-        .split("Reason:")
-        .nth(1)
-        .map(|s| s.split(']').next().unwrap_or(s).trim().to_string())
-        .unwrap_or_else(|| "Invariant broken".into());
-
-    Some(json!({
-        "id": format!("FUZZ-{idx:03}"),
-        "source": "fuzzer",
-        "severity": "High",
-        "confidence": "High",
-        "title": format!("Fuzzer broke invariant: {test_name}"),
-        "contract": "multiple",
-        "function": test_name,
-        "lines": [],
-        "property_violated": prop_id,
-        "attack_scenario": format!(
-            "Foundry invariant fuzzer found counterexample breaking {test_name}. Reason: {reason}. Run with -vvvv for full trace."
-        ),
-        "poc_file": null,
-        "poc_status": "compiles_and_demonstrates",
-        "dedup_hash": ""
-    }))
-}
-
 fn write_json(path: &Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value)?;
     std::fs::write(path, content)?;
@@ -573,5 +795,79 @@ fn clean_stub_poc_files(pocs_dir: &std::path::Path) {
                 let _ = std::fs::remove_file(&path);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failure(tool: &'static str, name: &str, seq: usize) -> Failure {
+        Failure {
+            tool,
+            invariant: name.into(),
+            reason: "Return false".into(),
+            sequence: (0..seq).map(|i| format!("call {i}")).collect(),
+        }
+    }
+
+    #[test]
+    fn failures_group_by_invariant_across_tools() {
+        let runs = [
+            ToolRun {
+                tool: "forge",
+                failures: vec![failure("forge", "invariant_P2_backing", 1)],
+                ..Default::default()
+            },
+            ToolRun {
+                tool: "medusa",
+                failures: vec![
+                    failure("medusa", "invariant_P2_backing", 3),
+                    failure("medusa", "invariant_P5_fees", 2),
+                ],
+                ..Default::default()
+            },
+        ];
+        let g = group_failures(&runs);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0].0, "invariant_P2_backing");
+        assert_eq!(g[0].1.len(), 2);
+    }
+
+    #[test]
+    fn verdict_must_name_the_invariant_and_a_known_class() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("v.json");
+        let write = |s: &str| std::fs::write(&p, s).unwrap();
+        write(
+            r#"{"invariant":"invariant_x","tools":["medusa"],"class":"real_violation","reason":"r"}"#,
+        );
+        assert_eq!(
+            read_classification(&p, "invariant_x").unwrap().class,
+            "real_violation"
+        );
+        assert!(read_classification(&p, "invariant_y").is_err());
+        write(r#"{"invariant":"invariant_x","class":"probably_fine","reason":"r"}"#);
+        assert!(read_classification(&p, "invariant_x").is_err());
+        assert!(read_classification(&dir.path().join("missing.json"), "invariant_x").is_err());
+    }
+
+    #[test]
+    fn a_real_violation_carries_the_longest_sequence_as_its_seed() {
+        let class = Classification {
+            invariant: "invariant_P2_backing".into(),
+            tools: vec!["forge".into(), "medusa".into()],
+            class: "real_violation".into(),
+            reason: "donation".into(),
+        };
+        let fails = [
+            failure("forge", "invariant_P2_backing", 1),
+            failure("medusa", "invariant_P2_backing", 3),
+        ];
+        let f = finding(1, "invariant_P2_backing", &fails, &class);
+        assert_eq!(f["id"], "FUZZ-001");
+        assert_eq!(f["property_violated"], "P-2");
+        assert_eq!(f["call_sequence"].as_array().unwrap().len(), 3);
+        assert_eq!(f["poc_status"], "compiles_but_inconclusive");
     }
 }
