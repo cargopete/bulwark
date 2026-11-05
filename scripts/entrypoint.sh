@@ -91,7 +91,7 @@ else
     echo "→ Updating existing clone..."
     cd "$AUDIT_DIR" && git fetch origin && git reset --hard "origin/$AUDIT_BRANCH"
     # Clean bulwark-generated test artefacts so stale PoCs don't interfere with a fresh run
-    git clean -fd -- "**/pocs/*.t.sol" "**/bulwark/*.sol" "**/test/formal/" 2>/dev/null || true
+    git clean -fd -- "**/pocs/*.t.sol" "**/bulwark/*.sol" "**/bulwark-formal/" 2>/dev/null || true
 fi
 
 cd "$AUDIT_DIR"
