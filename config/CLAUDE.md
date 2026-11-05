@@ -19,6 +19,10 @@ Do not create TODO.md files or run onboarding scripts.
 4. **Verify every finding** — trace call paths, confirm reachability, challenge your own assumptions
 5. **Generate PoCs** — write Foundry tests for any confirmed medium+ finding
 
+## Reading files
+Read files with the Read tool, not `sed`, `cat` or `head`. A shell read of anything under
+`~/.claude` (skill references included) is refused as an edit of a sensitive file.
+
 ## Key Commands
 - `forge build` — compile contracts from the project root or scope directory
 - `forge test -vvv` — run tests

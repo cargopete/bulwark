@@ -144,6 +144,7 @@ Each finding must match this schema:
   "lines": [42, 67],
   "property_violated": "P-6 | null",
   "attack_scenario": "3-sentence attack with specific numbers: amount per operation, accumulation over N operations, gas cost, net profit.",
+  "recommendation": "The fix, one or two sentences: what to change and where.",
   "economic_analysis": {
     "per_operation_impact_wei": 0,
     "at_1k_operations_tokens": 0.0,

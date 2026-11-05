@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod formal;
+pub mod fuzz_tools;
 pub mod fuzzing;
 pub mod poc;
 pub mod poc_evidence;

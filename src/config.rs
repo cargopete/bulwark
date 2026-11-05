@@ -152,6 +152,10 @@ pub struct ReconPassConfig {
     /// Max turns for the scv-scan Claude session.
     #[serde(default = "default_scv_scan_turns")]
     pub scv_scan_max_turns: u32,
+
+    /// What to do when a program asset's deployed source differs from the pinned commit.
+    #[serde(default)]
+    pub deployed_source: crate::deployed::OnMismatch,
 }
 
 impl Default for ReconPassConfig {
@@ -160,6 +164,7 @@ impl Default for ReconPassConfig {
             enabled: true,
             scv_scan: true,
             scv_scan_max_turns: default_scv_scan_turns(),
+            deployed_source: Default::default(),
         }
     }
 }
@@ -283,6 +288,10 @@ pub struct FuzzingPassConfig {
     #[serde(default = "default_invariant_depth")]
     pub invariant_depth: u32,
 
+    /// Forge invariant runs (`FOUNDRY_INVARIANT_RUNS`); `fuzz_runs` only affects fuzz tests.
+    #[serde(default = "default_invariant_runs")]
+    pub invariant_runs: u32,
+
     #[serde(default = "default_medusa_timeout")]
     pub medusa_timeout: u64,
 
@@ -303,6 +312,7 @@ impl Default for FuzzingPassConfig {
             enabled: true,
             fuzz_runs: default_fuzz_runs(),
             invariant_depth: default_invariant_depth(),
+            invariant_runs: default_invariant_runs(),
             medusa_timeout: default_medusa_timeout(),
             echidna_limit: default_echidna_limit(),
             max_turns: default_fuzz_turns(),
@@ -441,6 +451,9 @@ fn default_fuzz_runs() -> u64 {
 }
 fn default_invariant_depth() -> u32 {
     50
+}
+fn default_invariant_runs() -> u32 {
+    256
 }
 fn default_medusa_timeout() -> u64 {
     3600

@@ -90,6 +90,16 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir solc-select \
     && solc-select install 0.8.27 \
     && solc-select use 0.8.27
 
+# ── Medusa and Echidna (stateful fuzzers; both compile through crytic-compile) ──
+ARG MEDUSA_VERSION=v1.5.1
+ARG ECHIDNA_VERSION=2.3.3
+RUN ln -sf /opt/solidity-tools/bin/crytic-compile /usr/local/bin/crytic-compile \
+    && curl -fsSL "https://github.com/crytic/medusa/releases/download/${MEDUSA_VERSION}/medusa-linux-x64.tar.gz" \
+        | tar -xz -C /usr/local/bin medusa \
+    && curl -fsSL "https://github.com/crytic/echidna/releases/download/v${ECHIDNA_VERSION}/echidna-${ECHIDNA_VERSION}-x86_64-linux.tar.gz" \
+        | tar -xz -C /usr/local/bin echidna \
+    && medusa --version && echidna --version
+
 # ── Create audit user (non-root for safety) ──────────────────────────
 # UID must match the host user, or the mounted 0600 credentials file is unreadable.
 # Ubuntu 24.04 ships an `ubuntu` user on 1000, so it goes first.

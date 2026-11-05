@@ -86,8 +86,12 @@ Read ALL of these files (this is the full pipeline output):
 13. `audit-workspace/fuzzing/fuzzing-campaign-results/foundry-invariant.log` — Foundry output
 
 ### Pass 5: Formal Verification
-14. `audit-workspace/formal/verification-summary.json` — Halmos results per property
-15. `audit-workspace/formal/formal-findings.json` — counterexamples from Halmos
+14. `audit-workspace/formal/verification-summary.json` — Halmos results per property, in two
+    layers: `real` ran the in-scope contracts, `model` ran an import-free copy of their arithmetic.
+    A VERIFIED in either layer is bounded by the loop and solver limits. It is never a reason to
+    discard, downgrade or close a finding, and a model-layer result says nothing about the
+    deployed code. Model-layer counterexamples are leads to check by hand, not findings.
+15. `audit-workspace/formal/formal-findings.json` — counterexamples from the real layer
 
 ## Output Format
 

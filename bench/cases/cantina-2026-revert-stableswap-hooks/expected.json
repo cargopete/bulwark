@@ -1,0 +1,169 @@
+{
+  "case": "cantina-2026-revert-stableswap-hooks",
+  "source": "https://github.com/revert-finance/stableswap-hooks/blob/main/CANTINA.md",
+  "note": "Severities from the sponsor's CANTINA.md fix log, not the official PDF. #546/#522 and #63/#788 share one fix each.",
+  "findings": [
+    {
+      "id": "#29",
+      "severity": "High",
+      "title": "Native ETH removeLiquidity reentrancy lets LP swap against withdrawn stale reserves",
+      "contracts": [
+        "src/Liquidity.sol"
+      ],
+      "functions": [
+        "removeLiquidity"
+      ],
+      "root_cause": "removeLiquidity sends native ETH before burning shares and lowering reserves, so the ETH callback can re-enter and swap against the stale, still-large reserves."
+    },
+    {
+      "id": "#1351",
+      "severity": "Medium",
+      "title": "quoteZapIn underestimates shares, undermining slippage protection",
+      "contracts": [
+        "src/periphery/StableSwapZapIn.sol"
+      ],
+      "functions": [
+        "quoteZapIn"
+      ],
+      "root_cause": "The quote computes LP shares from pre-balancing-swap balances while sizing the deposit for post-swap balances, so it reads low and the user's minShares tolerance is far weaker than intended."
+    },
+    {
+      "id": "#998",
+      "severity": "Medium",
+      "title": "Reachable 4-token pool states allow zero-input exact-output reserve extraction",
+      "contracts": [
+        "src/Swap.sol",
+        "src/libraries/StableSwapMath.sol"
+      ],
+      "functions": [
+        "_swapExactOutput"
+      ],
+      "root_cause": "In reachable heavily imbalanced states, the exact-output required-input calculation rounds down to zero, so tokens leave the pool for no input."
+    },
+    {
+      "id": "#546",
+      "severity": "Medium",
+      "title": "Zero-fee exact-input round trips can extract reserves through StableSwap rounding asymmetry",
+      "contracts": [
+        "src/factories/StableSwapHooksFactory.sol",
+        "src/Fees.sol",
+        "src/Swap.sol"
+      ],
+      "functions": [
+        "deploy",
+        "setHookFeePercentage",
+        "setProtocolFeePercentage"
+      ],
+      "root_cause": "Pools may be deployed with a 0% LP fee, removing the retained-fee floor, so price-neutral round trips skim reserves through rounding."
+    },
+    {
+      "id": "#522",
+      "severity": "Medium",
+      "title": "Zero LP fee deployment allows a single exact-input swap to drain an output reserve, permanently bricking addLiquidity",
+      "contracts": [
+        "src/factories/StableSwapHooksFactory.sol",
+        "src/Fees.sol"
+      ],
+      "functions": [
+        "deploy",
+        "setHookFeePercentage",
+        "setProtocolFeePercentage"
+      ],
+      "root_cause": "Same root as #546: with no net LP fee left in reserves (0% LP fee, or hook+protocol cut equal to 100% of it), one swap can drive a reserve to zero and brick deposits and swaps."
+    },
+    {
+      "id": "#512",
+      "severity": "Medium",
+      "title": "StableSwapZapIn._calculateSwapAmount overshoots target ratio in 3+ token pools, causing up to ~17% LP-share loss",
+      "contracts": [
+        "src/periphery/StableSwapZapIn.sol"
+      ],
+      "functions": [
+        "_calculateSwapAmount"
+      ],
+      "root_cause": "A missing divisor in the balancing-swap sizing overshoots the target in pools of 3+ tokens, forcing extra fee-paying corrective swaps."
+    },
+    {
+      "id": "#102",
+      "severity": "Medium",
+      "title": "Asymmetric exact-output math enables systemic fee evasion and LP yield loss",
+      "contracts": [
+        "src/Swap.sol",
+        "src/Fees.sol"
+      ],
+      "functions": [
+        "_swapExactOutput",
+        "_getFees"
+      ],
+      "root_cause": "The exact-output fee is added on top of the trade cost rather than grossed up, so exact-output swaps pay less fee than the equivalent exact-input swap."
+    },
+    {
+      "id": "#63",
+      "severity": "Medium",
+      "title": "StableSwap invariant overflow causes persistent swap DoS in imbalanced pools",
+      "contracts": [
+        "src/libraries/StableSwapMath.sol",
+        "src/Swap.sol"
+      ],
+      "functions": [
+        "getInvariant"
+      ],
+      "root_cause": "Invariant computation overflows at reachable imbalanced reserve states, and every swap recomputes the invariant first, so all swaps revert."
+    },
+    {
+      "id": "#788",
+      "severity": "Medium",
+      "title": "Low-amp pools can be pushed into non-convergent reserve states that brick swaps",
+      "contracts": [
+        "src/libraries/StableSwapMath.sol",
+        "src/Swap.sol",
+        "src/Liquidity.sol"
+      ],
+      "functions": [
+        "getInvariant",
+        "getTargetReserves"
+      ],
+      "root_cause": "Nothing stops swaps or deposits from leaving a low-amplification pool in a state where the invariant iteration does not converge, after which every swap reverts."
+    },
+    {
+      "id": "#53",
+      "severity": "Medium",
+      "title": "Integer rounding in 3-token geometricMean leads to mispriced initial invariant and capital loss for LPs",
+      "contracts": [
+        "src/libraries/StableSwapMath.sol"
+      ],
+      "functions": [
+        "geometricMean",
+        "cbrt"
+      ],
+      "root_cause": "The geometric mean takes the cube root of each balance separately and multiplies, rounding down three times and undervaluing the first LP's deposit."
+    },
+    {
+      "id": "#15",
+      "severity": "Medium",
+      "title": "zapIn passes zero slippage to internal addLiquidity / swaps, enabling sandwich attacks",
+      "contracts": [
+        "src/periphery/StableSwapZapIn.sol"
+      ],
+      "functions": [
+        "zapIn"
+      ],
+      "root_cause": "The internal balancing swaps run with no per-swap minimum output, so adverse moves mid-zap are only caught (loosely) by the final minShares check."
+    },
+    {
+      "id": "#8",
+      "severity": "Medium",
+      "title": "Low-decimal exact-output swaps can withdraw LP reserves for zero input",
+      "contracts": [
+        "src/Swap.sol",
+        "src/libraries/StableSwapMath.sol"
+      ],
+      "functions": [
+        "_swapExactOutput",
+        "descale"
+      ],
+      "root_cause": "When pairing a 0-6 decimal token with an 18-decimal token, the required input is rounded down when descaled and can reach zero."
+    }
+  ],
+  "others": []
+}

@@ -1,0 +1,47 @@
+{
+  "case": "codehawks-2026-battlechain-confidence-pools",
+  "source": "https://codehawks.cyfrin.io/c/2026-07-battlechain-confidence-pools/results",
+  "findings": [
+    {
+      "id": "M-01",
+      "severity": "Medium",
+      "title": "withdraw() locks stakers with zero bonus when the registry skips straight to PRODUCTION, never passing through UNDER_ATTACK",
+      "contracts": [
+        "src/ConfidencePool.sol"
+      ],
+      "functions": [
+        "withdraw",
+        "_observePoolState"
+      ],
+      "root_cause": "withdraw() only permits exit in NOT_DEPLOYED/NEW_DEPLOYMENT/ATTACK_REQUESTED, assuming the registry always passes through UNDER_ATTACK; a jump to PRODUCTION closes the exit while riskWindowStart stays 0, so stakers are locked and earn no bonus."
+    },
+    {
+      "id": "M-02",
+      "severity": "Medium",
+      "title": "The recovery beneficiary can mint the CORRUPTED verdict its pool sweeps on, past the independent moderator",
+      "contracts": [
+        "src/ConfidencePoolFactory.sol",
+        "src/ConfidencePool.sol"
+      ],
+      "functions": [
+        "createPool",
+        "claimExpired"
+      ],
+      "root_cause": "The factory forces sponsor = agreement owner = recovery beneficiary, and in the Safe Harbor integration that owner is also the attackModerator; it can markCorrupted, wait out the grace period and let anyone finalise a bad-faith CORRUPTED that sweeps the pool to its own recovery address, bypassing the outcome moderator."
+    },
+    {
+      "id": "M-03",
+      "severity": "Medium",
+      "title": "The moderator grace can expire before CORRUPTED exists, letting anyone finalize the pool before the moderator gets a protected chance to classify it",
+      "contracts": [
+        "src/ConfidencePool.sol"
+      ],
+      "functions": [
+        "claimExpired",
+        "flagOutcome"
+      ],
+      "root_cause": "MODERATOR_CORRUPTED_GRACE counts from pool expiry rather than from when CORRUPTED first exists; if the agreement stays UNDER_ATTACK past the grace, the permissionless claimExpired fallback can finalise bad-faith CORRUPTED (latching claimsStarted) the moment it appears, before the moderator can classify it."
+    }
+  ],
+  "others": []
+}

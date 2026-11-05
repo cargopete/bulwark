@@ -165,6 +165,44 @@ pub fn pinned_commits(assets: &[Asset]) -> Vec<(String, usize)> {
     out
 }
 
+/// Smart-contract reward ceilings per severity, and the Critical percentage of funds at risk.
+fn rewards(bounty: &Value) -> (std::collections::BTreeMap<String, u64>, Option<f64>) {
+    let mut table = std::collections::BTreeMap::new();
+    let mut pct = None;
+    let rows = bounty
+        .get("programRewards")
+        .or_else(|| bounty.get("rewards"))
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for r in rows
+        .iter()
+        .filter(|r| r.get("assetType").and_then(|a| a.as_str()) == Some("smart_contract"))
+    {
+        let Some(sev) = r.get("severity").and_then(|s| s.as_str()) else {
+            continue;
+        };
+        let mut cap = sev.chars();
+        let sev = cap
+            .next()
+            .map(|c| c.to_uppercase().chain(cap).collect::<String>())
+            .unwrap_or_default();
+        if let Some(max) = r
+            .get("maxReward")
+            .or_else(|| r.get("fixedReward"))
+            .and_then(|m| m.as_u64())
+        {
+            table.insert(sev.clone(), max);
+        }
+        if sev == "Critical" {
+            pct = r
+                .get("rewardCalculationPercentage")
+                .and_then(|p| p.as_f64());
+        }
+    }
+    (table, pct)
+}
+
 /// `owner/repo` of a GitHub clone URL, https or ssh.
 fn github_repo(url: &str) -> Option<String> {
     let rest = url
@@ -257,6 +295,8 @@ pub fn parse_scope_page(html: &str) -> Result<Imported> {
         .map(|t| bullets(&t))
         .unwrap_or_default();
 
+    let (rewards, reward_pct) = rewards(bounty);
+
     let program = ProgramConfig {
         platform: "immunefi".into(),
         slug: bounty
@@ -266,12 +306,18 @@ pub fn parse_scope_page(html: &str) -> Result<Imported> {
             .into(),
         severity_system: "v2.3".into(),
         max_payout_usd: bounty.get("maxBounty").and_then(|m| m.as_u64()),
-        reward_formula: "fixed".into(),
-        reward_pct: None,
+        reward_formula: if reward_pct.is_some() {
+            "pct_of_funds_at_risk"
+        } else {
+            "fixed"
+        }
+        .into(),
+        reward_pct,
         requires_poc: true,
         requires_kyc: bounty.get("kyc").and_then(|k| k.as_bool()).unwrap_or(false),
         assets,
         impacts,
+        rewards,
         out_of_scope: OutOfScope { program_specific },
     };
     Ok(Imported {
@@ -662,5 +708,25 @@ mod tests {
         );
         assert!(!p.impacts.is_empty());
         assert!(!p.assets.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod reward_tests {
+    use super::*;
+
+    #[test]
+    fn rewards_read_ceilings_and_the_critical_percentage() {
+        let b: Value = serde_json::from_str(r#"{"programRewards": [
+            {"assetType": "smart_contract", "maxReward": 1000000, "rewardCalculationPercentage": 10, "severity": "critical"},
+            {"assetType": "smart_contract", "maxReward": 50000, "severity": "high"},
+            {"assetType": "smart_contract", "fixedReward": 10000, "severity": "medium"},
+            {"assetType": "websites_and_applications", "fixedReward": 5, "severity": "low"}]}"#).unwrap();
+        let (t, pct) = rewards(&b);
+        assert_eq!(t["Critical"], 1_000_000);
+        assert_eq!(t["High"], 50_000);
+        assert_eq!(t["Medium"], 10_000);
+        assert!(!t.contains_key("Low"));
+        assert_eq!(pct, Some(10.0));
     }
 }

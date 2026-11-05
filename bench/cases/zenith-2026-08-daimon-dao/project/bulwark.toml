@@ -1,0 +1,48 @@
+# Bench case: Daimon DAO (Zenith private engagement), findings published 2026-08-24.
+
+[target]
+repo = "https://github.com/daimon-dao/daimon-dao.git"
+branch = "master"
+commit = "4f89ab09d878b6d94e876c52be9a4920d4e8620f"
+scope = ["."]
+core_contracts = ["DaimonGovernor", "DaimonMigration", "DaimonStaking", "DaimonTimelock", "DaimonV2"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "src"
+files = ["src/DaimonGovernor.sol", "src/DaimonMigration.sol", "src/DaimonStaking.sol", "src/DaimonTimelock.sol", "src/DaimonV2.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

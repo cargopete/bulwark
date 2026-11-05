@@ -159,6 +159,7 @@ Each finding must match this schema:
   "lines": [42, 67],
   "property_violated": "P-10 | null",
   "attack_scenario": "3-sentence attack: WHO does WHAT to gain WHAT. Include exact function calls and estimated profit.",
+  "recommendation": "The fix, one or two sentences: what to change and where.",
   "poc_file": null,
   "poc_status": "not_attempted",
   "dedup_hash": ""

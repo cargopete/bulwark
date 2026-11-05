@@ -1,0 +1,265 @@
+{
+  "case": "guardian-2026-08-3jane-lcc",
+  "source": "https://github.com/GuardianAudits/Audits/blob/main/3Jane/2026-08-31_3Jane_LCC_Review.pdf",
+  "findings": [
+    {
+      "id": "M-01",
+      "severity": "Medium",
+      "title": "Debt-Funded Shares Fake Junior Backing",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "_subordinationDeployCapWaUSDC",
+        "availableDepositLimit"
+      ],
+      "root_cause": "The deployment cap counts every USD3 share held by sUSD3 as first-loss capital, so a borrower can deposit borrowed USDC through a debt-free receiver and transfer the shares to sUSD3, raising the cap with circular, debt-funded backing."
+    },
+    {
+      "id": "M-02",
+      "severity": "Medium",
+      "title": "Cured Markdowns Transfer Junior Principal",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "report",
+        "_postReportHook"
+      ],
+      "root_cause": "A temporary markdown loss permanently burns sUSD3-held shares, but a later cure is booked as fresh profit rather than restoring the junior tranche, moving value from junior to senior holders without any realised write-off."
+    },
+    {
+      "id": "M-03",
+      "severity": "Medium",
+      "title": "Pending Losses Inflate Credit Deployment Cap",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "_subordinationDeployCapWaUSDC"
+      ],
+      "root_cause": "The cap values sUSD3's shares at TokenizedStrategy's stored totalAssets, so after a markdown lowers the live Morpho claim but before report() runs, more liquidity can be deployed (and borrowed atomically) against junior backing the pending loss will consume."
+    },
+    {
+      "id": "M-04",
+      "severity": "Medium",
+      "title": "Fee Shares Recapture Their Own Profit",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "report",
+        "syncTrancheShare"
+      ],
+      "root_cause": "The sUSD3 yield share is implemented as Yearn performance-fee shares minted at the pre-report price, which then appreciate as the same report's locked profit unlocks, so sUSD3 and the fee recipient receive more than the configured fraction."
+    },
+    {
+      "id": "M-05",
+      "severity": "Medium",
+      "title": "Slash rake is capped by the leftover",
+      "contracts": [
+        "src/lcc/libraries/LCCAuctionLib.sol"
+      ],
+      "functions": [
+        "settle auction (LCCAuctionLib.sol:265-266)"
+      ],
+      "root_cause": "The slash fee is min(marginAwarded * slashFeeBps / BPS, surplus), and surplus is the margin no bidder took, so the fee tends to zero both when bidders take nothing and when they take the whole pool."
+    },
+    {
+      "id": "M-06",
+      "severity": "Medium",
+      "title": "Impaired tranche makes LCC default free",
+      "contracts": [
+        "src/lcc/LCCVault.sol"
+      ],
+      "functions": [
+        "takeAuction"
+      ],
+      "root_cause": "Once a borrower default wipes out sUSD3 and impairs USD3, senior shares still price at the pre-loss value until reported, and takeAuction pays bidders in those stale-priced shares, so forfeiting margin costs a defaulting funder little or nothing."
+    },
+    {
+      "id": "M-07",
+      "severity": "Medium",
+      "title": "Stale Markdown Lets Early USD3 Holders Exit",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "_harvestAndReport",
+        "availableWithdrawLimit"
+      ],
+      "root_cause": "MorphoCredit borrower status is time-derived, but totalMarkdownAmount only updates when the borrower is touched and USD3 never materialises markdowns on withdraw or report, so holders can exit at a stale price after a default and leave the loss to others."
+    },
+    {
+      "id": "M-08",
+      "severity": "Medium",
+      "title": "Exact-floor settlement forges USD3 NAV that extracts fresh depositor liquidity",
+      "contracts": [
+        "src/MorphoCredit.sol",
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "_updateMarketMarkdown",
+        "_applySettlement",
+        "_requireNewLendingAllowed",
+        "nav",
+        "availableWithdrawLimit"
+      ],
+      "root_cause": "A markdown exactly equal to the assets above the supply-price floor leaves the market out of wind-down; recapitalisation then inflates the floor, and _applySettlement clamps totalSupplyAssets to it without tokens, so USD3.nav counts unbacked assets that new deposits pay out."
+    },
+    {
+      "id": "M-09",
+      "severity": "Medium",
+      "title": "Tranche fee mint inflates the borrow cap",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "report",
+        "_postReportHook",
+        "_subordinationDeployCapWaUSDC"
+      ],
+      "root_cause": "report() mints the junior's performance-fee shares (accrued, unpaid interest) into sUSD3 before the post-report hook reapplies the cap, so receivables are counted as first-loss capital and levered into more deployable senior funds."
+    },
+    {
+      "id": "M-10",
+      "severity": "Medium",
+      "title": "Tranche Changes Reprice Accrued Profit",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "syncTrancheShare"
+      ],
+      "root_cause": "syncTrancheShare overwrites the performance-fee rate without first settling profit accrued under the old rate, so the next report applies the new rate retroactively to all profit since the previous report."
+    },
+    {
+      "id": "M-11",
+      "severity": "Medium",
+      "title": "Shutdown exits remain coupled to a failed high-utilization Morpho valuation",
+      "contracts": [
+        "src/usd3/USD3.sol",
+        "src/usd3/sUSD3.sol",
+        "src/irm/adaptive-curve-irm/AdaptiveCurveIrm.sol"
+      ],
+      "functions": [
+        "availableWithdrawLimit",
+        "nav",
+        "_calculateAdaptiveCurve"
+      ],
+      "root_cause": "USD3 and sUSD3 evaluate nav()/the Morpho position before checking shutdown; when a full markdown pushes utilisation above 100% the unbounded IRM math reverts, so even shutdown withdrawals are blocked."
+    },
+    {
+      "id": "M-12",
+      "severity": "Medium",
+      "title": "waUSDC pauses can block willing LCC funders and expose their entire margin to auction",
+      "contracts": [
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "availableDepositLimit",
+        "_deployFunds"
+      ],
+      "root_cause": "USD3 reports zero deposit capacity whenever waUSDC is paused, so an LCC funder's timely fundCall reverts at USD3 admission (before _deployFunds' local-hold fallback) and the funder is finalised as unfunded and loses its margin."
+    },
+    {
+      "id": "M-13",
+      "severity": "Medium",
+      "title": "Backdated zero-to-nonzero DRP creates redeemable phantom USD3 yield",
+      "contracts": [
+        "src/MorphoCredit.sol"
+      ],
+      "functions": [
+        "_accrueBorrowerPremium",
+        "_snapshotBorrowerPosition",
+        "_setBorrowerPremiumRate",
+        "_updatePositionWithPremium"
+      ],
+      "root_cause": "Zero or sub-threshold premium accrual returns without advancing lastAccrualTime while later snapshots replace principal, so a zero-to-nonzero premium-rate change is applied retroactively to principal that did not exist, crediting fabricated debt and supplier assets."
+    },
+    {
+      "id": "M-14",
+      "severity": "Medium",
+      "title": "Wind-down report rollback lets a cured borrower cash out junior capital and shift its next default to seniors",
+      "contracts": [
+        "src/usd3/USD3.sol",
+        "src/MorphoCredit.sol"
+      ],
+      "functions": [
+        "report",
+        "_postReportHook",
+        "_applyDeployCap",
+        "_supplyToMorpho",
+        "_afterRepay",
+        "_requireNewLendingAllowed"
+      ],
+      "root_cause": "After a floor-crossing markdown, report()'s unconditional post-report tend tries to refill the deployment gap, Morpho rejects new lending in wind-down and the whole report reverts, rolling back the junior share burn so the junior can exit and the next default hits seniors."
+    },
+    {
+      "id": "M-15",
+      "severity": "Medium",
+      "title": "Markdown-excluded deployment accounting lets cured borrowers drain reserves and realize losses above MAX_ON_CREDIT",
+      "contracts": [
+        "src/usd3/USD3.sol",
+        "src/MorphoCredit.sol"
+      ],
+      "functions": [
+        "_effectiveDeployCapWaUSDC",
+        "_deployFunds",
+        "_applyDeployCap",
+        "suppliedWaUSDC",
+        "_withdrawFromMorpho"
+      ],
+      "root_cause": "USD3 measures deployment from post-markdown supply-share value, omitting totalMarkdownAmount even though a markdown removes no waUSDC from Morpho, so it deploys reserves past MAX_ON_CREDIT that a cured borrower can then borrow and lose."
+    },
+    {
+      "id": "M-16",
+      "severity": "Medium",
+      "title": "Attacker-chosen premium crystallization lets new USD3 shares cash out historical unpaid yield",
+      "contracts": [
+        "src/usd3/USD3.sol",
+        "src/MorphoCredit.sol"
+      ],
+      "functions": [
+        "_harvestAndReport",
+        "accruePremiumsForBorrowers",
+        "_updatePositionWithPremium"
+      ],
+      "root_cause": "USD3 reports and previews accrue IRM interest but not borrower premium, so an entrant can mint shares and then permissionlessly checkpoint a long-stale premium, letting the next report spread historical receivables onto the new shares."
+    },
+    {
+      "id": "M-17",
+      "severity": "Medium",
+      "title": "Permissionless cures let late USD3 depositors snipe senior recovery",
+      "contracts": [
+        "src/MorphoCredit.sol",
+        "src/usd3/USD3.sol"
+      ],
+      "functions": [
+        "_trackObligationPayment",
+        "_afterRepay",
+        "_updateMarketMarkdown",
+        "availableDepositLimit"
+      ],
+      "root_cause": "A permissionless full-obligation repayment immediately reverses the borrower's whole markdown in MorphoCredit, while USD3 deposits still price at impaired stored totalAssets until a report, so an attacker can deposit cheaply and repay atomically to capture the recovery."
+    },
+    {
+      "id": "M-18",
+      "severity": "Medium",
+      "title": "Junior holders can withdraw fees on unpaid income before default",
+      "contracts": [
+        "src/MorphoCredit.sol",
+        "src/usd3/USD3.sol",
+        "src/usd3/sUSD3.sol"
+      ],
+      "functions": [
+        "_updatePositionWithPremium",
+        "_harvestAndReport",
+        "availableWithdrawLimit",
+        "_postReportHook"
+      ],
+      "root_cause": "MorphoCredit capitalises borrower premium into supplier assets without collecting tokens and USD3 reports it as profit, immediately minting fee shares to sUSD3 that junior holders can withdraw before the borrower defaults."
+    }
+  ],
+  "others": []
+}

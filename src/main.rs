@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod coverage;
 mod dashboard;
+mod deployed;
 mod docker;
 mod error;
 mod findings;
@@ -17,6 +18,7 @@ mod pin;
 mod pipeline;
 mod program;
 mod program_import;
+mod submission;
 mod tools;
 mod workspace;
 
@@ -249,6 +251,12 @@ fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyh
 
 fn cmd_findings(config: Config, audit_dir: PathBuf, args: cli::FindingsArgs) -> anyhow::Result<()> {
     let ws = Workspace::new(&audit_dir, &config.workspace.path);
+    if args.rejected {
+        return print_rejected(&ws);
+    }
+    if !args.json && ws.root().join("final-report.json").exists() {
+        return print_by_reward(&config, &ws, args.severity.as_deref());
+    }
     let merged = ws.merged_findings();
 
     if !merged.exists() {
@@ -400,6 +408,12 @@ fn cmd_report(config: Config, audit_dir: PathBuf, args: cli::ReportArgs) -> anyh
 
     // Use the review module's report generation (skips adversarial review)
     let result = passes::review::generate_report(&ctx)?;
+    let drafts = submission::write_all(&ctx.config, &ctx.audit_dir, ctx.workspace.root())?;
+    eprintln!(
+        "  {} submission draft(s) in {}",
+        drafts.len(),
+        ctx.workspace.root().join("submissions").display()
+    );
 
     match args.format.as_str() {
         "json" => {
@@ -775,4 +789,126 @@ fn which_claude() -> PathBuf {
     .map(PathBuf::from)
     .find(|p| p.exists())
     .unwrap_or_else(|| PathBuf::from("claude"))
+}
+
+fn read_list(path: PathBuf) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// Final findings, best estimated reward first, with what a reviewer needs to triage them.
+fn print_by_reward(config: &Config, ws: &Workspace, severity: Option<&str>) -> anyhow::Result<()> {
+    let report: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        ws.root().join("final-report.json"),
+    )?)?;
+    let field = |f: &serde_json::Value, k: &str| {
+        f.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    };
+    let mut rows: Vec<(Option<u64>, serde_json::Value)> = report
+        .get("findings")
+        .and_then(|f| f.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| severity.is_none_or(|s| field(f, "severity").eq_ignore_ascii_case(s)))
+        .map(|f| {
+            let funds = f.get("funds_at_risk_usd").and_then(|x| x.as_f64());
+            (
+                submission::estimate_reward(&field(&f, "severity"), config.program.as_ref(), funds),
+                f,
+            )
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    eprintln!(
+        "{} ({} findings, best estimated reward first)\n",
+        style("Findings").bold(),
+        rows.len()
+    );
+    for (reward, f) in &rows {
+        let id = field(f, "id");
+        let poc: serde_json::Value =
+            std::fs::read_to_string(ws.pocs_dir().join(format!("{id}.poc.json")))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+        let flags = poc
+            .get("lint_flags")
+            .and_then(|l| l.as_array())
+            .map_or(0, |a| a.len());
+        let impact = config
+            .program
+            .as_ref()
+            .and_then(|p| p.impact(&field(f, "impact")))
+            .map_or("no impact row".to_string(), |i| i.text.clone());
+        eprintln!(
+            "  {} [{}] {} · {}",
+            style(&id).bold(),
+            field(f, "severity"),
+            reward.map_or("reward unknown".to_string(), |r| format!("up to ${r}")),
+            field(f, "title")
+        );
+        eprintln!(
+            "       impact: {impact} · PoC {} ({}) · {flags} cheatcode flag(s) · scope pin {}",
+            field(f, "poc_status"),
+            field(f, "poc_mode"),
+            if field(f, "scope_pin").is_empty() {
+                "-".into()
+            } else {
+                field(f, "scope_pin")
+            },
+        );
+        eprintln!(
+            "       draft: {}\n",
+            ws.root()
+                .join("submissions")
+                .join(format!("{id}.md"))
+                .display()
+        );
+    }
+    Ok(())
+}
+
+/// What the gates threw away and why: looking at it is how the filters get tuned.
+fn print_rejected(ws: &Workspace) -> anyhow::Result<()> {
+    let field = |f: &serde_json::Value, k: &str| {
+        f.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    };
+    let lists = [
+        ("Scope gate", ws.rejected_findings(), "scope_rejection"),
+        (
+            "Known-issue duplicates",
+            ws.known_duplicates(),
+            "duplicate_of",
+        ),
+        ("PoC gate", ws.discarded_findings(), "poc_status"),
+        ("PoC unverifiable", ws.unverifiable_findings(), "poc_status"),
+    ];
+    for (name, path, why_key) in lists {
+        let items = read_list(path);
+        eprintln!("{} ({})", style(name).bold(), items.len());
+        for f in &items {
+            let why = f
+                .get(why_key)
+                .map(|w| {
+                    w.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| w.to_string())
+                })
+                .or_else(|| f.get("poc_reasons").map(|r| r.to_string()))
+                .unwrap_or_default();
+            eprintln!(
+                "  {} [{}] {}\n       {}",
+                field(f, "id"),
+                field(f, "severity"),
+                field(f, "title"),
+                why
+            );
+        }
+        eprintln!();
+    }
+    Ok(())
 }

@@ -689,14 +689,43 @@ fn write_markdown_report(
             if let Some(props) = ver.get("properties").and_then(|v| v.as_object()) {
                 writeln!(f, "## Formal Verification (Halmos)")?;
                 writeln!(f)?;
-                writeln!(f, "| Property | Status | Duration | Bound |")?;
-                writeln!(f, "|----------|--------|----------|-------|")?;
+                writeln!(
+                    f,
+                    "`real` runs the in-scope contracts; `model` is an import-free copy of their \
+                     arithmetic. VERIFIED is bounded and clears no finding."
+                )?;
+                writeln!(f)?;
+                writeln!(
+                    f,
+                    "| Property | Layer | Contract | Status | Duration | Bound |"
+                )?;
+                writeln!(
+                    f,
+                    "|----------|-------|----------|--------|----------|-------|"
+                )?;
                 for (prop, data) in props {
-                    let status = data.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                    let dur = data.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
                     let bound = data.get("loop_bound").and_then(|v| v.as_u64());
                     let bound_str = bound.map_or("-".into(), |b| format!("loop={b}"));
-                    writeln!(f, "| {prop} | {status} | {dur}s | {bound_str} |")?;
+                    let mut rows: Vec<(&str, &Value)> = data
+                        .get("real")
+                        .and_then(|v| v.as_array())
+                        .map(|rs| rs.iter().map(|r| ("real", r)).collect())
+                        .unwrap_or_default();
+                    if let Some(m) = data.get("model") {
+                        rows.push(("model", m));
+                    }
+                    if rows.is_empty() {
+                        rows.push(("-", data));
+                    }
+                    for (layer, r) in rows {
+                        let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
+                        let contract = r.get("contract").and_then(|v| v.as_str()).unwrap_or("-");
+                        let dur = r.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
+                        writeln!(
+                            f,
+                            "| {prop} | {layer} | {contract} | {status} | {dur}s | {bound_str} |"
+                        )?;
+                    }
                 }
                 writeln!(f)?;
             }

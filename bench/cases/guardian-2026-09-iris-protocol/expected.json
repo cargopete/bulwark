@@ -1,0 +1,75 @@
+{
+  "case": "guardian-2026-09-iris-protocol",
+  "source": "https://github.com/GuardianAudits/Audits/blob/main/iris.credit/2026-09-23_iris.credit_Iris_Protocol.pdf",
+  "findings": [
+    {
+      "id": "M-01",
+      "severity": "Medium",
+      "title": "Liquidation Charges Fixed and Floating",
+      "contracts": [
+        "src/Iris.sol"
+      ],
+      "functions": [
+        "_rebase"
+      ],
+      "root_cause": "After a venue liquidation repays debt (including accrued floating interest) from borrower collateral, _rebase derives the floating leg from the remaining live venue debt and erases the already-paid floating cost, so it is never charged to the solver bond and the borrower pays both fixed and floating."
+    },
+    {
+      "id": "M-02",
+      "severity": "Medium",
+      "title": "Delayed Rebase Falsely Slashes Solver Bond",
+      "contracts": [
+        "src/Iris.sol"
+      ],
+      "functions": [
+        "_accrueLegs",
+        "_rebase",
+        "liquidateBond",
+        "escape"
+      ],
+      "root_cause": "_accrueLegs runs before _rebase, so after a permissionless Morpho partial liquidation of the Pod interest is accrued on debt already repaid, inflating negative spread until the solver bond becomes liquidatable; the borrower can trigger this and profit."
+    },
+    {
+      "id": "M-03",
+      "severity": "Medium",
+      "title": "_accrueLegsView() over-accrues surplus on pre-liquidation Aave collateral and _rebase() converts the overage into solver owned yield",
+      "contracts": [
+        "src/Iris.sol"
+      ],
+      "functions": [
+        "_accrueLegsView",
+        "_accrueLegs",
+        "_rebase"
+      ],
+      "root_cause": "Surplus is accrued on stale stored collateral before live venue collateral is synced, so after a partial Aave liquidation yield is booked on seized collateral and _rebase's split charges that excess to the borrower's principal as solver surplus."
+    },
+    {
+      "id": "M-04",
+      "severity": "Medium",
+      "title": "setAuthorizationWithSig() lets stale signed grants restore revoked operators",
+      "contracts": [
+        "src/Iris.sol"
+      ],
+      "functions": [
+        "setAuthorizationWithSig",
+        "setAuthorization"
+      ],
+      "root_cause": "Signed authorisations only check that the nonce is unused, so an older unused isAuthorized=true signature can be replayed after a direct revoke to restore a removed operator."
+    },
+    {
+      "id": "M-05",
+      "severity": "Medium",
+      "title": "Borrowers can flash-wash tracked collateral to steal solver Aave yield",
+      "contracts": [
+        "src/Iris.sol",
+        "src/adapters/AaveV3Adapter.sol"
+      ],
+      "functions": [
+        "withdrawCollateral",
+        "escape"
+      ],
+      "root_cause": "Iris ignores live Aave collateral above tracked Position.collateral, so a borrower can supply directly to Aave on the Pod's behalf and withdraw the same amount through Iris, shrinking tracked collateral so future yield on it escapes the solver."
+    }
+  ],
+  "others": []
+}

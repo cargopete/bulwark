@@ -1,0 +1,56 @@
+# Bench case: iris.credit Iris Protocol (Guardian private engagement), findings published 2026-09-29.
+
+[target]
+repo = "https://github.com/iris-credit/iris-core.git"
+branch = "main"
+commit = "895a35ae752b91f81ab852634a6d1de17621bff5"
+scope = ["."]
+core_contracts = ["Pod", "AaveV3Adapter", "MorphoBlueAdapter", "Blm", "WhitelistBlm"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "src"
+files = ["src/Pod.sol"]
+
+[[passes.agents.components]]
+name = "adapters"
+files = ["src/adapters/AaveV3Adapter.sol", "src/adapters/MorphoBlueAdapter.sol"]
+
+[[passes.agents.components]]
+name = "blm"
+files = ["src/blm/Blm.sol", "src/blm/WhitelistBlm.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

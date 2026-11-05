@@ -1,0 +1,176 @@
+{
+  "case": "oz-2026-09-onchainid",
+  "source": "https://www.openzeppelin.com/news/onchainid-audit",
+  "findings": [
+    {
+      "id": "C-01",
+      "severity": "Critical",
+      "title": "Validator and Account Resolve the Same Batch Calldata to Different Targets",
+      "contracts": [
+        "contracts/modules/validators/ERC734Validator.sol",
+        "contracts/SmartAccount.sol"
+      ],
+      "functions": [
+        "_scopeAllows",
+        "_targetAllowed",
+        "_execute"
+      ],
+      "root_cause": "Validator and account both decode the batch with ERC7579Utils.decodeBatch, whose pointer bounds are checked against each frame's calldatasize, so an oversized wrapping pointer reads as an allowed external target in the validator but as target zero (the identity itself) in the account. An ACTION-only key can thus self-call addKey and grant itself MANAGEMENT."
+    },
+    {
+      "id": "H-01",
+      "severity": "High",
+      "title": "Queued Approval Omits the Factory Guard That Auto-Approval Enforces",
+      "contracts": [
+        "contracts/modules/executors/KeyApprovalModule.sol",
+        "contracts/SmartAccount.sol"
+      ],
+      "functions": [
+        "approve",
+        "_canAutoApprove",
+        "_runApproved",
+        "_isKeyAuthorizedToCallTarget"
+      ],
+      "root_cause": "_canAutoApprove refuses factory-targeted requests from non-MANAGEMENT keys but approve treats the factory as an ordinary external target needing only ACTION, and the dispatch then runs under the module's MANAGEMENT key. An ACTION key can approve its own queued factory call, e.g. revokeAccount on the identity's MANAGEMENT wallet."
+    },
+    {
+      "id": "H-02",
+      "severity": "High",
+      "title": "Key Registry Not Recognized as a Privileged Call Target",
+      "contracts": [
+        "contracts/modules/executors/KeyApprovalModule.sol",
+        "contracts/SmartAccount.sol"
+      ],
+      "functions": [
+        "_canAutoApprove",
+        "_authorizeCall"
+      ],
+      "root_cause": "_canAutoApprove refuses only the factory and defers to the account's own-module check, which is derived from installation state rather than the immutable registryModule(). If a deployment does not install the validator as an executor, an ACTION key can queue addKey on the registry and grant itself MANAGEMENT."
+    },
+    {
+      "id": "M-01",
+      "severity": "Medium",
+      "title": "Last-Manager Guard Counts Module Keys That Cannot Sign",
+      "contracts": [
+        "contracts/modules/validators/ERC734Validator.sol",
+        "contracts/factory/IdentityFactory.sol"
+      ],
+      "functions": [
+        "removeKey",
+        "initialize",
+        "_doCreateIdentity"
+      ],
+      "root_cause": "The removeKey guard requires more than one MANAGEMENT entry, but module keys (which can never sign) are counted, so a single owner can remove the only signing MANAGEMENT key and lock the identity; the factory's post-deploy check has the same flaw."
+    },
+    {
+      "id": "M-02",
+      "severity": "Medium",
+      "title": "Cross-Identity Claim Writes Are Authorized Against the Validator Singleton Instead of the Issuer",
+      "contracts": [
+        "contracts/modules/validators/ERC734Validator.sol"
+      ],
+      "functions": [
+        "addClaimTo",
+        "_requireClaimKey"
+      ],
+      "root_cause": "addClaimTo calls addClaim on the target from the shared ERC734Validator singleton, so the target's claim-key check is evaluated against the singleton rather than the issuer; one claim key granted to the singleton admits every issuer."
+    },
+    {
+      "id": "M-03",
+      "severity": "Medium",
+      "title": "Installed Executors Cannot Be Reached by the Account, Leaving Their Self-Gated Functions Unreachable",
+      "contracts": [
+        "contracts/SmartAccount.sol",
+        "contracts/modules/executors/RecoveryModule.sol"
+      ],
+      "functions": [
+        "_authorizeCall"
+      ],
+      "root_cause": "_authorizeCall blocks any dispatched call targeting an installed executor with no exemption even for MANAGEMENT self-calls, so account-gated functions on RecoveryModule (owner veto, guardian/threshold setters) can never be called by the account."
+    },
+    {
+      "id": "M-04",
+      "severity": "Medium",
+      "title": "The Factory's Post-Deployment Key Check Is Answered by a Caller-Supplied Fallback Handler",
+      "contracts": [
+        "contracts/factory/IdentityFactory.sol",
+        "contracts/Identity.sol"
+      ],
+      "functions": [
+        "_doCreateIdentity",
+        "initialize"
+      ],
+      "root_cause": "The factory checks for a MANAGEMENT key by calling getKeysByPurpose through the identity, which is served by a fallback handler chosen by the deployer; a handler returning one entry passes while the real registry holds no MANAGEMENT key, yielding a permanently unmanageable factory-flagged identity."
+    },
+    {
+      "id": "M-05",
+      "severity": "Medium",
+      "title": "Non-Canonical ERC-7930 Envelopes Give One Wallet Multiple Registry Keys",
+      "contracts": [
+        "contracts/factory/IdentityFactory.sol"
+      ],
+      "functions": [
+        "_walletKey",
+        "linkAccount",
+        "revokeAccount",
+        "_linkAccount",
+        "_processMessage"
+      ],
+      "root_cause": "The wallet key is keccak256 of the raw envelope bytes while parsing ignores trailing bytes, so padded encodings of the same wallet hash to new slots, breaking sticky binding, terminal revocation and one-wallet-per-key."
+    },
+    {
+      "id": "M-06",
+      "severity": "Medium",
+      "title": "Signature-Based Linking Does Not Constrain the Envelope's Chain Type or Reference",
+      "contracts": [
+        "contracts/factory/IdentityFactory.sol"
+      ],
+      "functions": [
+        "linkAccount"
+      ],
+      "root_cause": "linkAccount discards the envelope's chain type and reference and accepts whatever SignatureChecker.isValidSignatureNow accepts; for addresses longer than 20 bytes the caller-chosen ERC-7913 verifier is self-certifying, so arbitrary (including non-EVM) wallets can be linked with a dummy signature."
+    },
+    {
+      "id": "M-07",
+      "severity": "Medium",
+      "title": "Claim Digests and Revocation Records Are Recomputed From the Issuer's Live EIP-712 Domain",
+      "contracts": [
+        "contracts/modules/validators/ERC734Validator.sol"
+      ],
+      "functions": [
+        "_getClaimDigest",
+        "_getClaimStatus",
+        "removeClaim"
+      ],
+      "root_cause": "Claim digests are rebuilt from the issuer's current eip712Domain() on every read and revocation is keyed on that digest, so any domain change (or a >31-byte name that silently empties the domain) invalidates stored claims and lets revoked claims be re-added. Acknowledged, not fixed."
+    },
+    {
+      "id": "M-08",
+      "severity": "Medium",
+      "title": "Cross-Chain Link Confirmation Skips the Validations the Local Path Enforces",
+      "contracts": [
+        "contracts/factory/IdentityFactory.sol"
+      ],
+      "functions": [
+        "confirmCrossChainLink",
+        "_processMessage",
+        "_linkAccount"
+      ],
+      "root_cause": "Envelope parsing and the ASSET/SMART_CONTRACT rejection live only in linkAccount, so the cross-chain path can attach extra unrevocable wallets to ASSET identities, store malformed envelopes, and stage links for local EVM addresses without a signature."
+    },
+    {
+      "id": "M-09",
+      "severity": "Medium",
+      "title": "createIdentityFor Binds a Wallet Without Proof of Control and Does Not Tie Management to the Account",
+      "contracts": [
+        "contracts/factory/IdentityFactory.sol"
+      ],
+      "functions": [
+        "createIdentityFor",
+        "_doCreateIdentity"
+      ],
+      "root_cause": "createIdentityFor auto-links an arbitrary _account with no proof of control and caller-supplied keys, so a caller can permanently bind a victim's wallet to an identity it alone manages."
+    }
+  ],
+  "others": []
+}
