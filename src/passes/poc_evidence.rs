@@ -1,7 +1,8 @@
 //! Grading a generated PoC from what it measured, not from whether `forge test` went green.
 //!
 //! A PoC demonstrates only when a test passes, logs a nonzero `bulwark:attacker_gain` or
-//! `bulwark:victim_loss`, trips no cheatcode lint, and ran on a fork of deployed contracts.
+//! `bulwark:victim_loss`, and trips no cheatcode lint. On a fork of deployed contracts that is
+//! `compiles_and_demonstrates`; on a local deployment it is `demonstrated_local`.
 
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -19,6 +20,13 @@ pub enum PocMode {
 }
 
 impl PocMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            PocMode::Fork { .. } => "fork",
+            PocMode::Local => "local",
+        }
+    }
+
     /// Extra `forge test` arguments, and the same with the RPC URL left as `$ENV` for logs.
     pub fn forge_args(&self, rpc_url: Option<&str>) -> (Vec<String>, Vec<String>) {
         match self {
@@ -373,7 +381,19 @@ pub fn grade(
 
     let tests = match tests {
         Some(t) if !t.is_empty() => t,
-        _ => return inconclusive(vec!["no test ran".into()], true),
+        // A test function forge did not run is a harness fault; rewriting the PoC cannot fix it.
+        _ if source.contains("function test") => {
+            return inconclusive(
+                vec!["no test ran: forge collected no test from this file".into()],
+                false,
+            );
+        }
+        _ => {
+            return inconclusive(
+                vec!["no test ran: the file has no test function".into()],
+                true,
+            );
+        }
     };
     let Some(proving) = tests.iter().find(|t| t.passed && t.has_impact()) else {
         let reasons = if tests.iter().any(|t| t.passed) {
@@ -395,23 +415,28 @@ pub fn grade(
         return inconclusive(reasons, true);
     };
 
-    let mut reasons = Vec::new();
-    for f in &lint.flags {
-        reasons.push(format!("line {}: {} {}", f.line, f.cheat, f.detail));
+    if !lint.flags.is_empty() {
+        let reasons = lint
+            .flags
+            .iter()
+            .map(|f| format!("line {}: {} {}", f.line, f.cheat, f.detail))
+            .collect();
+        return inconclusive(reasons, true);
     }
-    let lint_clean = reasons.is_empty();
-    if *mode == PocMode::Local {
-        reasons.push("ran on a local deployment, not a fork of the deployed contracts".into());
-    }
-    if reasons.is_empty() {
-        Grade {
+    match mode {
+        PocMode::Fork { .. } => Grade {
             status: "compiles_and_demonstrates",
             reasons: vec![format!("{} measured impact", proving.name)],
             retryable: false,
-        }
-    } else {
-        // Lint flags may be fixable by another attempt; running locally is not.
-        inconclusive(reasons, !lint_clean)
+        },
+        PocMode::Local => Grade {
+            status: "demonstrated_local",
+            reasons: vec![format!(
+                "{} measured impact on a local deployment, not a fork of the deployed contracts",
+                proving.name
+            )],
+            retryable: false,
+        },
     }
 }
 
@@ -475,21 +500,74 @@ mod tests {
     }
 
     #[test]
+    fn uncollected_test_is_not_retried() {
+        let src = "contract P is Test { function test_x() public {} }";
+        let g = grade(src, Some(&[]), &LintReport::default(), &fork());
+        assert_eq!(g.status, "compiles_but_inconclusive");
+        assert!(!g.retryable);
+        let g = grade(
+            "contract P is Test {}",
+            None,
+            &LintReport::default(),
+            &fork(),
+        );
+        assert!(g.retryable);
+    }
+
+    #[test]
     fn clean_fork_pass_with_impact_demonstrates() {
         let g = grade("", Some(&passing("5")), &LintReport::default(), &fork());
         assert_eq!(g.status, "compiles_and_demonstrates");
     }
 
     #[test]
-    fn local_pass_is_inconclusive_and_not_retried() {
+    fn clean_local_pass_with_impact_is_demonstrated_local() {
         let g = grade(
             "",
-            Some(&passing("5")),
+            Some(&passing("90909090909")),
+            &LintReport::default(),
+            &PocMode::Local,
+        );
+        assert_eq!(g.status, "demonstrated_local");
+        assert!(g.reasons[0].contains("local deployment"));
+        assert!(!g.retryable);
+    }
+
+    #[test]
+    fn local_victim_loss_alone_is_demonstrated_local() {
+        let mut t = passing("0");
+        t[0].victim_loss = Some("7".into());
+        let g = grade("", Some(&t), &LintReport::default(), &PocMode::Local);
+        assert_eq!(g.status, "demonstrated_local");
+    }
+
+    #[test]
+    fn local_pass_without_impact_stays_inconclusive() {
+        let g = grade(
+            "",
+            Some(&passing("0")),
             &LintReport::default(),
             &PocMode::Local,
         );
         assert_eq!(g.status, "compiles_but_inconclusive");
-        assert!(!g.retryable);
+        assert!(g.retryable);
+    }
+
+    #[test]
+    fn local_failure_with_impact_logged_stays_inconclusive() {
+        let mut t = passing("5");
+        t[0].passed = false;
+        let g = grade("", Some(&t), &LintReport::default(), &PocMode::Local);
+        assert_eq!(g.status, "compiles_but_inconclusive");
+    }
+
+    #[test]
+    fn lint_flags_block_local_demonstration() {
+        let lint = lint("function t() public { vm.prank(governor); }");
+        let g = grade("", Some(&passing("5")), &lint, &PocMode::Local);
+        assert_eq!(g.status, "compiles_but_inconclusive");
+        assert!(g.reasons.iter().any(|r| r.contains("vm.prank")));
+        assert!(g.retryable);
     }
 
     #[test]

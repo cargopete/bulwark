@@ -37,6 +37,23 @@ impl PipelineContext {
     ///
     /// Checks the project directory (`bulwark_root/prompts/`) first — allowing per-project
     /// prompt overrides — then falls back to the install directory (`bulwark_install/prompts/`).
+    /// The stage's voice guide and logbook rules, to append to its prompt; empty if it has none.
+    pub fn persona_section(&self, stage: &str) -> String {
+        let Some(key) = self.config.persona_for(stage) else {
+            return String::new();
+        };
+        let read = |f: &str| {
+            std::fs::read_to_string(self.resolve_prompt_path(&format!("personas/{f}.md")))
+        };
+        match (read(&key), read("_logbook")) {
+            (Ok(voice), Ok(logbook)) => format!("\n{voice}{logbook}"),
+            _ => {
+                tracing::warn!("persona {key} for {stage} not found; running without a voice");
+                String::new()
+            }
+        }
+    }
+
     pub fn resolve_prompt_path(&self, filename: &str) -> PathBuf {
         let project_path = self
             .bulwark_root

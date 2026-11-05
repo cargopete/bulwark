@@ -1,5 +1,25 @@
 use crate::error::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// The project's test directory, relative to `pkg_dir`. Forge only collects tests under it,
+/// so a file written anywhere else compiles and never runs.
+pub fn test_dir(pkg_dir: &Path) -> PathBuf {
+    std::fs::read_to_string(pkg_dir.join("foundry.toml"))
+        .ok()
+        .and_then(|s| test_dir_from_toml(&s))
+        .unwrap_or_else(|| PathBuf::from("test"))
+}
+
+fn test_dir_from_toml(foundry_toml: &str) -> Option<PathBuf> {
+    let value: toml::Value = toml::from_str(foundry_toml).ok()?;
+    let dir = value
+        .get("profile")?
+        .get("default")?
+        .get("test")?
+        .as_str()?;
+    let dir = dir.trim_start_matches("./").trim_end_matches('/');
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
+}
 
 /// Run `forge build --force --ast` in a package directory.
 /// The `--ast` flag embeds source AST in build artifacts — required by Halmos 0.2.x
@@ -153,4 +173,31 @@ pub struct TestResult {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dir_reads_the_default_profile() {
+        let toml = "[profile.default]\nsrc = \"contracts\"\ntest = \"test-foundry\"\n";
+        assert_eq!(
+            test_dir_from_toml(toml),
+            Some(PathBuf::from("test-foundry"))
+        );
+        assert_eq!(
+            test_dir_from_toml("[profile.default]\ntest = './forge/test/'\n"),
+            Some(PathBuf::from("forge/test"))
+        );
+    }
+
+    #[test]
+    fn test_dir_defaults_to_test() {
+        assert_eq!(
+            test_dir_from_toml("[profile.default]\nsrc = 'contracts'\n"),
+            None
+        );
+        assert_eq!(test_dir(Path::new("/nonexistent")), PathBuf::from("test"));
+    }
 }

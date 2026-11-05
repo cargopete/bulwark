@@ -1,10 +1,21 @@
 use crate::budget::{self, Ledger};
-use crate::error::Result;
+use crate::error::{BulwarkError, Result};
+use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::time::Instant;
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut p = path.as_os_str().to_owned();
+    p.push(suffix);
+    PathBuf::from(p)
+}
 
 /// Configuration for a headless Claude Code session.
 pub struct ClaudeSession {
@@ -18,15 +29,15 @@ pub struct ClaudeSession {
     /// Tools the subprocess is allowed to use (passed as `--allowedTools`).
     /// Empty means no explicit restriction.
     pub allowed_tools: Vec<String>,
-    /// Hard wall-clock timeout for the subprocess. If set, the command is
-    /// wrapped with the system `timeout` utility and killed after this many
-    /// minutes. Exit code 124 means timeout was hit.
+    /// Wall-clock limit in minutes; the session is killed and reports `TIMEOUT_EXIT`.
     pub timeout_minutes: Option<u32>,
     /// Ledger name for this session, e.g. `poc:F-003`.
     pub label: String,
     /// Dollar cap passed as `--max-budget-usd`; `None` is unlimited.
     pub budget_usd: Option<f64>,
     pub ledger: Option<Arc<Ledger>>,
+    /// Session to continue with `--resume`; `prompt` is then the message sent to it.
+    pub resume: Option<String>,
 }
 
 /// Result of a completed Claude session.
@@ -34,6 +45,10 @@ pub struct ClaudeOutput {
     pub exit_code: i32,
     pub log_file: PathBuf,
     pub cost_usd: Option<f64>,
+    /// From the stream's `init` event; `None` if the session never started.
+    pub session_id: Option<String>,
+    /// Launches including stall restarts; 1 for a session that never stalled.
+    pub attempts: u32,
 }
 
 /// The `type: "result"` record of `--output-format json`, which may be the whole
@@ -80,86 +95,270 @@ pub fn parse_session_json(stdout: &str) -> Option<SessionResult> {
     })
 }
 
-impl ClaudeSession {
-    /// Run the Claude session, writing stdout+stderr to the log file.
-    pub async fn run(&self) -> Result<ClaudeOutput> {
-        budget::check_cap(self.budget_usd)?;
-        let reservation = match &self.ledger {
-            Some(l) => Some(l.reserve(&self.label, self.model.clone(), self.budget_usd)?),
-            None => None,
-        };
-        // If a timeout is configured, wrap with system `timeout` utility so the
-        // subprocess is hard-killed after the wall-clock limit.
-        let mut cmd = if let Some(mins) = self.timeout_minutes {
-            let mut c = Command::new("timeout");
-            c.arg(format!("{}m", mins)).arg(&self.claude_bin);
-            c
-        } else {
-            Command::new(&self.claude_bin)
-        };
+/// Set by the first session refused for a bad login; every later session would fail the same way.
+static AUTH_FAILED: AtomicBool = AtomicBool::new(false);
 
+pub fn auth_failed() -> bool {
+    AUTH_FAILED.load(Ordering::Relaxed)
+}
+
+fn auth_failure(events: &[&str]) -> bool {
+    events.iter().any(|e| {
+        serde_json::from_str::<serde_json::Value>(e)
+            .is_ok_and(|v| v.get("error").and_then(|x| x.as_str()) == Some("authentication_failed"))
+    })
+}
+
+/// A session silent for this long is killed and restarted. Claude Code caps a Bash call at ten
+/// minutes, so a live session always emits something well inside it.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+pub const MAX_STALL_RESTARTS: u32 = 2;
+/// Exit code when the wall-clock timeout ends a session, as `timeout(1)` reports it.
+pub const TIMEOUT_EXIT: i32 = 124;
+/// Exit code when every attempt stalled.
+pub const STALLED_EXIT: i32 = 125;
+const STALL_RESUME_PROMPT: &str =
+    "You were interrupted. Carry on with the task from where you left off.";
+
+/// The raw event stream a session appends to beside its log.
+pub fn live_log(log_file: &Path) -> PathBuf {
+    with_suffix(log_file, ".live.jsonl")
+}
+
+fn init_session_id(lines: &[String]) -> Option<String> {
+    lines.iter().find_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).ok()?;
+        if v.get("type")?.as_str()? != "system" || v.get("subtype")?.as_str()? != "init" {
+            return None;
+        }
+        Some(v.get("session_id")?.as_str()?.to_string())
+    })
+}
+
+enum Ending {
+    Exited(i32),
+    Stalled,
+    TimedOut,
+}
+
+struct Attempt {
+    lines: Vec<String>,
+    stderr: Vec<u8>,
+    ending: Ending,
+}
+
+impl ClaudeSession {
+    fn command(&self, resume: Option<&str>) -> Command {
+        let mut cmd = Command::new(&self.claude_bin);
+        if let Some(id) = resume {
+            cmd.arg("--resume").arg(id);
+        }
+        // The prompt goes on stdin: Linux refuses any single argument over 128KB.
         cmd.arg("-p")
-            .arg(&self.prompt)
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
             .arg("--verbose")
             .arg("--output-format")
-            .arg("json");
+            .arg("stream-json");
 
         if let Some(cap) = self.budget_usd {
             let cli_cap = cap * budget::CLI_CAP_FRACTION;
             cmd.arg("--max-budget-usd").arg(format!("{cli_cap:.2}"));
         }
-
         if let Some(model) = &self.model {
             cmd.arg("--model").arg(model);
         }
-
-        if !self.allowed_tools.is_empty() {
-            for tool in &self.allowed_tools {
-                cmd.arg("--allowedTools").arg(tool);
-            }
+        for tool in &self.allowed_tools {
+            cmd.arg("--allowedTools").arg(tool);
         }
+        cmd.current_dir(&self.working_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        cmd
+    }
 
-        let output = match cmd.current_dir(&self.working_dir).output().await {
-            Ok(o) => o,
-            Err(e) => {
-                // Never started, so nothing was spent.
-                if let (Some(l), Some(i)) = (&self.ledger, reservation) {
-                    l.settle(i, Some(0.0), None, "spawn_failed")?;
+    async fn attempt(
+        &self,
+        stall: Duration,
+        deadline: Option<Instant>,
+        live: &Path,
+        resume: Option<&str>,
+        prompt: &str,
+    ) -> std::io::Result<Attempt> {
+        let mut child = self.command(resume).spawn()?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let prompt = prompt.to_owned();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(prompt.as_bytes()).await;
+        });
+        let mut stderr = child.stderr.take().expect("stderr is piped");
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf).await;
+            buf
+        });
+        let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped")).lines();
+        let mut live_log = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(live)
+            .await?;
+
+        let mut lines = Vec::new();
+        let ending = loop {
+            let wait = match deadline {
+                Some(d) => stall.min(d.saturating_duration_since(Instant::now())),
+                None => stall,
+            };
+            match tokio::time::timeout(wait, stdout.next_line()).await {
+                Ok(Ok(Some(line))) => {
+                    live_log.write_all(line.as_bytes()).await?;
+                    live_log.write_all(b"\n").await?;
+                    lines.push(line);
                 }
-                return Err(e.into());
+                Ok(_) => {
+                    let status = child.wait().await?;
+                    break Ending::Exited(status.code().unwrap_or(-1));
+                }
+                Err(_) => {
+                    let _ = child.kill().await;
+                    break match deadline {
+                        Some(d) if Instant::now() >= d => Ending::TimedOut,
+                        _ => Ending::Stalled,
+                    };
+                }
             }
         };
+        let stderr = stderr_task.await.unwrap_or_default();
+        Ok(Attempt {
+            lines,
+            stderr,
+            ending,
+        })
+    }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    /// Run the Claude session, writing stdout+stderr to the log file.
+    pub async fn run(&self) -> Result<ClaudeOutput> {
+        self.run_watched(STALL_TIMEOUT).await
+    }
+
+    async fn run_watched(&self, stall: Duration) -> Result<ClaudeOutput> {
+        budget::check_cap(self.budget_usd)?;
+        if auth_failed() {
+            return Err(BulwarkError::ClaudeAuth(
+                "an earlier session was refused".into(),
+            ));
+        }
+        let reservation = match &self.ledger {
+            Some(l) => Some(l.reserve(&self.label, self.model.clone(), self.budget_usd)?),
+            None => None,
+        };
+        let deadline = self
+            .timeout_minutes
+            .map(|m| Instant::now() + Duration::from_secs(u64::from(m) * 60));
+        let live = live_log(&self.log_file);
+        // A resumed session's earlier events stay, so the log covers the whole session.
+        if self.resume.is_none() {
+            let _ = std::fs::remove_file(&live);
+        }
+
+        let mut stalls = 0;
+        let mut session_id = self.resume.clone();
+        let mut resume = self.resume.clone();
+        let mut prompt = self.prompt.as_str();
+        let attempt = loop {
+            let attempt = match self
+                .attempt(stall, deadline, &live, resume.as_deref(), prompt)
+                .await
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    if let (Some(l), Some(i)) = (&self.ledger, reservation) {
+                        l.settle(i, Some(0.0), None, "spawn_failed")?;
+                    }
+                    return Err(e.into());
+                }
+            };
+            if let Some(id) = init_session_id(&attempt.lines) {
+                session_id = Some(id);
+            }
+            if matches!(attempt.ending, Ending::Stalled) && stalls < MAX_STALL_RESTARTS {
+                stalls += 1;
+                // Without an id the session never started, so there is nothing to resume.
+                let how = match &session_id {
+                    Some(id) => {
+                        resume = Some(id.clone());
+                        prompt = STALL_RESUME_PROMPT;
+                        "resuming"
+                    }
+                    None => "restarting",
+                };
+                eprintln!(
+                    "    {} {} silent for {}s, {how} ({stalls}/{MAX_STALL_RESTARTS})",
+                    style("⚠").yellow(),
+                    self.label,
+                    stall.as_secs()
+                );
+                continue;
+            }
+            break attempt;
+        };
+
+        // Stream lines that parse form the same array `--output-format json --verbose` prints.
+        let events: Vec<&str> = attempt
+            .lines
+            .iter()
+            .map(String::as_str)
+            .filter(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
+            .collect();
+        let stdout = format!("[{}]", events.join(","));
         let parsed = parse_session_json(&stdout);
 
         // The log keeps the session's final text, which the passes parse; raw JSON sits beside it.
         let mut log_content = Vec::new();
         match &parsed {
             Some(r) => log_content.extend_from_slice(r.text.as_bytes()),
-            None => log_content.extend_from_slice(&output.stdout),
+            None => log_content.extend_from_slice(attempt.lines.join("\n").as_bytes()),
         }
-        if !output.stderr.is_empty() {
+        if !attempt.stderr.is_empty() {
             log_content.extend_from_slice(b"\n--- STDERR ---\n");
-            log_content.extend_from_slice(&output.stderr);
+            log_content.extend_from_slice(&attempt.stderr);
         }
         std::fs::write(&self.log_file, &log_content)?;
-        let mut raw = self.log_file.clone().into_os_string();
-        raw.push(".json");
-        std::fs::write(raw, &output.stdout)?;
+        std::fs::write(with_suffix(&self.log_file, ".json"), &stdout)?;
 
         let cost_usd = parsed.as_ref().and_then(|r| r.cost_usd);
+        let exit_code = match attempt.ending {
+            Ending::Exited(c) => c,
+            Ending::TimedOut => TIMEOUT_EXIT,
+            Ending::Stalled => STALLED_EXIT,
+        };
+        let refused = auth_failure(&events);
         if let (Some(l), Some(i)) = (&self.ledger, reservation) {
-            let outcome = parsed.as_ref().map_or("no_result", |r| r.outcome.as_str());
+            let outcome = match (&parsed, exit_code) {
+                _ if refused => "auth_failed",
+                (Some(r), _) => r.outcome.as_str(),
+                (None, STALLED_EXIT) => "stalled",
+                (None, TIMEOUT_EXIT) => "timed_out",
+                (None, _) => "no_result",
+            };
             l.settle(i, cost_usd, parsed.as_ref().and_then(|r| r.turns), outcome)?;
         }
 
+        if refused {
+            AUTH_FAILED.store(true, Ordering::Relaxed);
+            let why = parsed.map(|r| r.text).unwrap_or_default();
+            return Err(BulwarkError::ClaudeAuth(why));
+        }
+
         Ok(ClaudeOutput {
-            exit_code: output.status.code().unwrap_or(-1),
+            exit_code,
             log_file: self.log_file.clone(),
             cost_usd,
+            session_id,
+            attempts: stalls + 1,
         })
     }
 
@@ -183,8 +382,11 @@ impl ClaudeSession {
             Ok(output) if output.exit_code == 0 => {
                 pb.finish_with_message(format!("{label} done"));
             }
-            Ok(output) if output.exit_code == 124 => {
+            Ok(output) if output.exit_code == TIMEOUT_EXIT => {
                 pb.finish_with_message(format!("{label} TIMED OUT"));
+            }
+            Ok(output) if output.exit_code == STALLED_EXIT => {
+                pb.finish_with_message(format!("{label} STALLED"));
             }
             Ok(_output) => {
                 pb.finish_with_message(format!("{label} done (with errors)"));
@@ -200,12 +402,13 @@ impl ClaudeSession {
 
 /// Check if a Claude Code slash command (skill) is available.
 ///
-/// Skills are markdown files installed to `~/.claude/commands/<name>.md`.
-/// In the Docker container, the install-skills.sh script copies them there.
+/// A skill directory `~/.claude/skills/<name>/SKILL.md`, or a command file
+/// `~/.claude/commands/<name>.md`. install-skills.sh writes the former.
 pub fn is_skill_available(skill_name: &str) -> bool {
     let home = std::env::var("HOME").unwrap_or_default();
-    let path = format!("{home}/.claude/commands/{skill_name}.md");
-    std::path::Path::new(&path).exists()
+    let skill = format!("{home}/.claude/skills/{skill_name}/SKILL.md");
+    let command = format!("{home}/.claude/commands/{skill_name}.md");
+    std::path::Path::new(&skill).exists() || std::path::Path::new(&command).exists()
 }
 
 /// Check if Claude Code is authenticated (API key, credentials file, or `claude auth status`).
@@ -340,6 +543,14 @@ pub(crate) fn looks_like_findings(arr: &[serde_json::Value]) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_expired_login_is_an_auth_failure() {
+        let refused = r#"{"type":"assistant","message":{"content":[]},"error":"authentication_failed","is_api_error_message":true}"#;
+        let fine = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"authentication_failed"}]}}"#;
+        assert!(auth_failure(&[fine, refused]));
+        assert!(!auth_failure(&[fine]));
+    }
     use super::*;
     use std::io::Write;
 
@@ -486,6 +697,115 @@ some text
         assert!(!looks_like_findings(&arr));
     }
 
+    // macOS can hold the first exec of a freshly written script for seconds, so a test that needs
+    // the child to speak in time gives it a wide window.
+    fn fake_claude(dir: &Path, body: &str) -> ClaudeSession {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("claude");
+        std::fs::write(&bin, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ClaudeSession {
+            claude_bin: bin,
+            prompt: "p".into(),
+            max_turns: 1,
+            working_dir: dir.to_path_buf(),
+            log_file: dir.join("s.log"),
+            model: None,
+            allowed_tools: vec![],
+            timeout_minutes: None,
+            label: "test".into(),
+            budget_usd: None,
+            ledger: None,
+            resume: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn streamed_result_is_parsed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let s = fake_claude(
+            dir.path(),
+            r#"echo '{"type":"system","subtype":"init"}'
+echo '{"type":"result","subtype":"success","result":"done","total_cost_usd":0.5,"num_turns":3}'"#,
+        );
+        let out = s.run_watched(Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.cost_usd, Some(0.5));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("s.log")).unwrap(),
+            "done"
+        );
+        let live = std::fs::read_to_string(dir.path().join("s.log.live.jsonl")).unwrap();
+        assert_eq!(live.lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn silent_session_is_restarted_then_reported_stalled() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let s = fake_claude(dir.path(), "exec sleep 30");
+        let out = s.run_watched(Duration::from_secs(1)).await.unwrap();
+        assert_eq!(out.exit_code, STALLED_EXIT);
+        assert_eq!(out.attempts, MAX_STALL_RESTARTS + 1);
+    }
+
+    #[tokio::test]
+    async fn stall_restart_resumes_the_session_it_saw() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = dir.path().join("args");
+        let s = fake_claude(
+            dir.path(),
+            &format!(
+                r#"echo "$@" >> {}
+case "$1" in
+  --resume) echo '{{"type":"result","subtype":"success","result":"resumed"}}' ;;
+  *) echo '{{"type":"system","subtype":"init","session_id":"abc-123"}}'; exec sleep 30 ;;
+esac"#,
+                args.display()
+            ),
+        );
+        let out = s.run_watched(Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.session_id.as_deref(), Some("abc-123"));
+        let calls = std::fs::read_to_string(&args).unwrap();
+        let calls: Vec<&str> = calls.lines().collect();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].starts_with("-p --max-turns"));
+        assert!(calls[1].starts_with("--resume abc-123 -p --max-turns"));
+        // The resumed attempt appends to the stream rather than replacing it.
+        let live = std::fs::read_to_string(dir.path().join("s.log.live.jsonl")).unwrap();
+        assert_eq!(live.lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_prompt_too_large_for_argv_reaches_the_cli() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let got = dir.path().join("stdin");
+        let mut s = fake_claude(
+            dir.path(),
+            &format!(
+                r#"cat > {}
+echo '{{"type":"result","subtype":"success","result":"ok"}}'"#,
+                got.display()
+            ),
+        );
+        s.prompt = "x".repeat(4 << 20);
+        let out = s.run_watched(Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(std::fs::metadata(&got).unwrap().len(), 4 << 20);
+    }
+
+    #[tokio::test]
+    async fn steady_output_keeps_a_session_alive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let s = fake_claude(
+            dir.path(),
+            r#"for i in 1 2 3 4; do echo '{"type":"assistant"}'; sleep 0.5; done
+echo '{"type":"result","subtype":"success","result":"ok"}'"#,
+        );
+        let out = s.run_watched(Duration::from_secs(5)).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+    }
+
     #[test]
     fn is_skill_available_returns_false_for_nonexistent_skill() {
         assert!(!is_skill_available(
@@ -499,13 +819,20 @@ some text
         let commands_dir = dir.path().join(".claude/commands");
         std::fs::create_dir_all(&commands_dir).unwrap();
         std::fs::write(commands_dir.join("test-skill.md"), "# Test Skill").unwrap();
+        let skill_dir = dir.path().join(".claude/skills/tob-test-dir-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: tob-test-dir-skill\n---",
+        )
+        .unwrap();
 
         // Temporarily override HOME (unsafe since Rust 1.85 — process-wide)
         let original_home = std::env::var("HOME").unwrap_or_default();
         unsafe {
             std::env::set_var("HOME", dir.path());
         }
-        let result = is_skill_available("test-skill");
+        let result = is_skill_available("test-skill") && is_skill_available("tob-test-dir-skill");
         unsafe {
             std::env::set_var("HOME", &original_home);
         }

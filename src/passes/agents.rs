@@ -1,3 +1,5 @@
+use crate::coverage::{self, Evidence, Shallow, Thresholds};
+use crate::dashboard::status::parse_events;
 use crate::error::{BulwarkError, Result};
 use crate::findings::Finding;
 use crate::findings::merge;
@@ -6,7 +8,9 @@ use crate::tools::claude::{self, ClaudeSession};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 /// Pass 2: Multi-Agent Adversarial Analysis.
@@ -44,6 +48,15 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         all_agents.clone()
     };
 
+    let unmatchable = coverage::Scope::from_config(&ctx.config).drop_unmatchable(&ctx.audit_dir);
+    if !unmatchable.is_empty() {
+        eprintln!(
+            "  {} Not holding agents to asset names no source file matches: {}",
+            style("→").cyan(),
+            unmatchable.join(", ")
+        );
+    }
+
     let max_turns = ctx.config.passes.agents.max_turns;
     let timeout = Duration::from_secs(ctx.config.passes.agents.timeout_minutes * 60);
 
@@ -58,9 +71,40 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         }
     }
 
+    let mut jobs: Vec<Job> = Vec::new();
+    for agent in &agents {
+        jobs.push(Job {
+            name: agent.clone(),
+            prompt: std::fs::read_to_string(ctx.resolve_prompt_path(&format!("{agent}-agent.md")))?
+                + &ctx.persona_section(agent),
+            model: ctx.config.model_for(agent),
+        });
+    }
+    if agent_filter.is_none() && !ctx.config.passes.agents.components.is_empty() {
+        let hunter = std::fs::read_to_string(ctx.resolve_prompt_path("hunter-agent.md"))?;
+        for c in &ctx.config.passes.agents.components {
+            let name = format!("hunt-{}", c.name);
+            jobs.push(Job {
+                prompt: format!(
+                    "{hunter}{}{}",
+                    ctx.persona_section("hunter"),
+                    component_section(ctx, &name, &c.files)
+                ),
+                name,
+                model: ctx.config.model_for("hunter"),
+            });
+        }
+    }
+    let names: Vec<String> = jobs.iter().map(|j| j.name.clone()).collect();
+    let max_parallel = ctx.config.passes.agents.max_parallel.max(1);
+
     eprintln!("  Max turns per agent: {max_turns}");
     eprintln!("  Timeout: {} minutes", timeout.as_secs() / 60);
-    eprintln!("  Launching {} agents in parallel...\n", agents.len());
+    eprintln!(
+        "  Launching {} agents, {max_parallel} at a time: {}\n",
+        jobs.len(),
+        names.join(", ")
+    );
 
     // Set up progress bars
     let multi = MultiProgress::new();
@@ -71,26 +115,37 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
 
     // Launch agents in parallel
     let mut set = JoinSet::new();
-    let agent_count = agents.len();
+    let agent_count = jobs.len();
+    let slots = Arc::new(Semaphore::new(max_parallel));
     // Variant analysis draws on the same allowance after the agents, so it takes one share.
     let allowance = ctx.allowance("agents");
     let variant_share = usize::from(ctx.config.passes.agents.variant_analysis);
     let agent_cap = allowance.split(agent_count + variant_share);
 
-    for agent_name in &agents {
+    for job in jobs {
         let ctx = ctx.clone();
-        let name = agent_name.clone();
+        let name = job.name.clone();
         let claude_bin = claude_bin.clone();
+        let slots = slots.clone();
         let pb = multi.add(ProgressBar::new_spinner());
         pb.set_style(spinner_style.clone());
         pb.set_prefix(name.to_uppercase());
-        pb.set_message("running...");
+        pb.set_message("queued");
         pb.enable_steady_tick(Duration::from_millis(120));
 
         set.spawn(async move {
-            let result = run_single_agent(&ctx, &name, &claude_bin, max_turns, agent_cap).await;
+            let _slot = slots
+                .acquire_owned()
+                .await
+                .expect("semaphore is never closed");
+            pb.set_message("running...");
+            let result = run_single_agent(&ctx, &job, &claude_bin, max_turns, agent_cap).await;
             match &result {
-                Ok(count) => pb.finish_with_message(format!("{count} findings")),
+                Ok(AgentOutcome {
+                    findings,
+                    shallow: Some(_),
+                }) => pb.finish_with_message(format!("{findings} findings, shallow")),
+                Ok(o) => pb.finish_with_message(format!("{} findings", o.findings)),
                 Err(e) => pb.finish_with_message(format!("failed: {e}")),
             }
             (name, result)
@@ -98,12 +153,19 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     }
 
     // Wait for all agents with timeout
+    let mut shallow = Vec::new();
     let agent_results = tokio::time::timeout(timeout, async {
         let mut results = Vec::new();
         while let Some(res) = set.join_next().await {
             match res {
-                Ok((name, Ok(count))) => {
-                    results.push((name, count));
+                Ok((name, Ok(outcome))) => {
+                    if let Some(missing) = outcome.shallow {
+                        shallow.push(Shallow {
+                            agent: name.clone(),
+                            missing,
+                        });
+                    }
+                    results.push((name, outcome.findings));
                 }
                 Ok((name, Err(e))) => {
                     eprintln!(
@@ -129,6 +191,16 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
 
     eprintln!();
 
+    if !shallow.is_empty() {
+        let who: Vec<String> = shallow.iter().map(|s| s.agent.to_uppercase()).collect();
+        eprintln!(
+            "  {} Shallow sessions, still short of evidence after a resume: {}",
+            style("⚠").yellow(),
+            who.join(", ")
+        );
+    }
+    write_shallow(ctx, &names, shallow)?;
+
     // Check if all agents failed
     let total_findings: usize = agent_results.iter().map(|(_, c)| *c).sum();
     if total_findings == 0 && agent_results.iter().all(|(_, c)| *c == 0) {
@@ -139,9 +211,18 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         );
     }
 
+    // Agents' experiments would break every later build if one fails to compile; keep them for triage.
+    let scratch = ctx.build_dir().join("test/scratch");
+    if scratch.exists() {
+        let kept = ctx.workspace.findings_dir().join("agent-tests");
+        let _ = std::fs::remove_dir_all(&kept);
+        std::fs::rename(&scratch, &kept)?;
+        eprintln!("  Agent experiments moved to {}", kept.display());
+    }
+
     // Merge and deduplicate
     eprintln!("  Merging and deduplicating findings...");
-    let merge_result = merge_agent_outputs(ctx, &agents)?;
+    let merge_result = merge_agent_outputs(ctx, &names)?;
 
     eprintln!();
     for (name, count) in &agent_results {
@@ -196,44 +277,97 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     ))
 }
 
+struct Job {
+    name: String,
+    prompt: String,
+    model: String,
+}
+
+/// Runtime instructions for a component hunter: its files and where its output goes.
+fn component_section(ctx: &PipelineContext, name: &str, files: &[String]) -> String {
+    let list: String = files.iter().map(|f| format!("- `{f}`\n")).collect();
+    let rel = |p: std::path::PathBuf| {
+        p.strip_prefix(&ctx.audit_dir)
+            .map(|r| r.display().to_string())
+            .unwrap_or_else(|_| p.display().to_string())
+    };
+    format!(
+        "\n\n## Runtime instructions\n\nYour component is `{name}`. Its files:\n\n{list}\n\
+         Write findings to `{}` and coverage to `{}`.\n",
+        rel(ctx.workspace.agent_raw_output(name)),
+        rel(ctx.workspace.agent_coverage(name)),
+    )
+}
+
 async fn run_single_agent(
     ctx: &PipelineContext,
-    agent_name: &str,
+    job: &Job,
     claude_bin: &Path,
     max_turns: u32,
     budget_usd: Option<f64>,
-) -> Result<usize> {
-    let prompt_file = ctx.resolve_prompt_path(&format!("{agent_name}-agent.md"));
-    let mut prompt = std::fs::read_to_string(&prompt_file)?;
+) -> Result<AgentOutcome> {
+    let agent_name = job.name.as_str();
+    let mut prompt = job.prompt.clone();
     if let Some(program) = &ctx.config.program {
         prompt.push_str(&program.prompt_section());
     }
     let output_file = ctx.workspace.agent_raw_output(agent_name);
     let log_file = ctx.workspace.agent_log(agent_name);
 
-    let session = ClaudeSession {
+    let mut session = ClaudeSession {
         claude_bin: claude_bin.to_path_buf(),
         prompt,
         max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: log_file.clone(),
-        model: Some(ctx.config.model_for(agent_name)),
+        model: Some(job.model.clone()),
         allowed_tools: vec![],
         timeout_minutes: None, // Pass 2 uses its own tokio::time::timeout wrapper
         label: format!("agent:{agent_name}"),
         budget_usd,
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
-    let result = session.run().await?;
-
-    if result.exit_code != 0 {
+    let mut scope = coverage::Scope::from_config(&ctx.config);
+    scope.drop_unmatchable(&ctx.audit_dir);
+    let thresholds = Thresholds::from_config(&ctx.config.passes.agents);
+    let mut shallow = None;
+    for attempt in 0..2 {
+        let result = session.run().await?;
+        if result.exit_code != 0 {
+            eprintln!(
+                "  {} {} agent exited with code {}",
+                style("⚠").yellow(),
+                agent_name.to_uppercase(),
+                result.exit_code
+            );
+        }
+        let gaps = coverage::missing(&scope, agent_name, &evidence(ctx, agent_name), &thresholds);
+        if gaps.is_empty() {
+            break;
+        }
+        if attempt == 1 {
+            eprintln!(
+                "  {} {} agent is shallow: {}",
+                style("⚠").yellow(),
+                agent_name.to_uppercase(),
+                gaps.join("; ")
+            );
+            shallow = Some(gaps);
+            break;
+        }
         eprintln!(
-            "  {} {} agent exited with code {}",
+            "  {} {} agent is short of evidence, resuming: {}",
             style("⚠").yellow(),
             agent_name.to_uppercase(),
-            result.exit_code
+            gaps.join("; ")
         );
+        // A session that never started has nothing to resume, so it reruns from the top.
+        if let Some(id) = result.session_id {
+            session.prompt = coverage::resume_prompt(&gaps);
+            session.resume = Some(id);
+        }
     }
 
     // Check if agent wrote the expected output file
@@ -255,7 +389,37 @@ async fn run_single_agent(
         extract_and_save(&log_file, &output_file)?
     };
 
-    Ok(findings_count)
+    Ok(AgentOutcome {
+        findings: findings_count,
+        shallow,
+    })
+}
+
+struct AgentOutcome {
+    findings: usize,
+    /// What the session still owed after its resume.
+    shallow: Option<Vec<String>>,
+}
+
+fn evidence(ctx: &PipelineContext, agent: &str) -> Evidence {
+    let live = claude::live_log(&ctx.workspace.agent_log(agent));
+    let forge_test_runs = std::fs::read_to_string(live)
+        .map(|t| parse_events(&t).forge_test_runs)
+        .unwrap_or(0);
+    Evidence::read(&ctx.workspace, agent, forge_test_runs)
+}
+
+/// Records from earlier runs survive for agents this run did not touch, as with `--agent`.
+fn write_shallow(ctx: &PipelineContext, ran: &[String], shallow: Vec<Shallow>) -> Result<()> {
+    let path = ctx.workspace.shallow_sessions();
+    let mut all: Vec<Shallow> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    all.retain(|s| !ran.contains(&s.agent));
+    all.extend(shallow);
+    std::fs::write(&path, serde_json::to_string_pretty(&all)?)?;
+    Ok(())
 }
 
 /// Fallback: extract findings JSON from a Claude log file.
@@ -332,7 +496,7 @@ async fn run_variant_analysis(
 
         let session = ClaudeSession {
             claude_bin: claude_bin.clone(),
-            prompt,
+            prompt: format!("{prompt}{}", ctx.persona_section("variant_analysis")),
             max_turns: ctx.config.passes.agents.variant_max_turns,
             working_dir: ctx.audit_dir.clone(),
             log_file,
@@ -342,6 +506,7 @@ async fn run_variant_analysis(
             label: format!("variant:{}", finding.id),
             budget_usd: allowance.split(high_findings.len() - idx),
             ledger: Some(ctx.ledger.clone()),
+            resume: None,
         };
 
         let _ = session

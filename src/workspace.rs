@@ -57,6 +57,11 @@ impl Workspace {
         self.root.join("pipeline-status.json")
     }
 
+    /// Results the target's own `slither.db.json` had triaged away.
+    pub fn slither_triaged(&self) -> PathBuf {
+        self.recon_dir().join("slither-triaged.json")
+    }
+
     pub fn known_duplicates(&self) -> PathBuf {
         self.findings_dir().join("known-duplicates.json")
     }
@@ -89,6 +94,14 @@ impl Workspace {
         self.pocs_dir().join("unverifiable-findings.json")
     }
 
+    pub fn fp_check_dir(&self) -> PathBuf {
+        self.pocs_dir().join("fp-check")
+    }
+
+    pub fn fp_check_verdict(&self, finding_id: &str) -> PathBuf {
+        self.fp_check_dir().join(format!("{finding_id}.json"))
+    }
+
     pub fn final_report_md(&self) -> PathBuf {
         self.root.join("final-report.md")
     }
@@ -101,6 +114,15 @@ impl Workspace {
 
     pub fn agent_raw_output(&self, agent: &str) -> PathBuf {
         self.findings_dir().join(format!("{agent}-agent-raw.json"))
+    }
+
+    pub fn agent_coverage(&self, agent: &str) -> PathBuf {
+        self.findings_dir()
+            .join(format!("{agent}-agent-coverage.json"))
+    }
+
+    pub fn shallow_sessions(&self) -> PathBuf {
+        self.findings_dir().join("shallow-sessions.json")
     }
 
     pub fn agent_log(&self, agent: &str) -> PathBuf {

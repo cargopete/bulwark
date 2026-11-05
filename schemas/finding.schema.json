@@ -57,6 +57,7 @@
       "type": "string",
       "enum": [
         "compiles_and_demonstrates",
+        "demonstrated_local",
         "compiles_but_inconclusive",
         "failed_to_compile",
         "infeasible_conditions",

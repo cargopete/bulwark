@@ -9,7 +9,7 @@ TOOLS_DIR="/home/auditor/tools"
 CLAUDE_DIR="/home/auditor/.claude"
 COMMANDS_DIR="$CLAUDE_DIR/commands"
 
-mkdir -p "$TOOLS_DIR" "$COMMANDS_DIR"
+mkdir -p "$TOOLS_DIR" "$COMMANDS_DIR" "$CLAUDE_DIR/skills"
 
 # ── Trail of Bits: claude-code-config ────────────────────────────────
 echo "  → Trail of Bits claude-code-config..."
@@ -38,64 +38,39 @@ else
     echo "    ✗ Trail of Bits config unavailable"
 fi
 
-# ── Trail of Bits: skills repo ───────────────────────────────────────
+# Trail of Bits plugins keep each skill at plugins/<plugin>/skills/<skill>/SKILL.md, beside the
+# references it reads. Install the whole directory as `tob-<skill>`, so `/tob-<skill>` resolves.
+install_tob_skills() {
+    local repo="$1" count=0 skill_dir skill_name dest
+    for skill_dir in "$repo"/plugins/*/skills/*/; do
+        [ -f "$skill_dir/SKILL.md" ] || continue
+        skill_name="tob-$(basename "$skill_dir")"
+        dest="$CLAUDE_DIR/skills/$skill_name"
+        rm -rf "$dest" "$COMMANDS_DIR/$skill_name.md"
+        mkdir -p "$dest"
+        cp -r "$skill_dir". "$dest/"
+        sed -i "1,/^---$/!b; 0,/^name:.*/s//name: $skill_name/" "$dest/SKILL.md"
+        count=$((count + 1))
+    done
+    echo "$count"
+}
+
+clone_once() {
+    [ -d "$2" ] || git clone --depth 1 "$1" "$2" 2>/dev/null
+}
+
 echo "  → Trail of Bits skills..."
-TOB_SKILLS="$TOOLS_DIR/tob-skills"
-if [ ! -d "$TOB_SKILLS" ]; then
-    git clone --depth 1 https://github.com/trailofbits/skills.git "$TOB_SKILLS" 2>/dev/null || {
-        echo "    ✗ Could not clone trailofbits/skills — skipping"
-        TOB_SKILLS=""
-    }
-fi
-
-if [ -n "$TOB_SKILLS" ] && [ -d "$TOB_SKILLS" ]; then
-    # Look for plugin/skill definitions and copy as slash commands
-    SKILL_COUNT=0
-    for skill_dir in "$TOB_SKILLS"/plugins/*/; do
-        if [ -d "$skill_dir" ]; then
-            skill_name=$(basename "$skill_dir")
-            # Look for the main prompt/instruction file
-            for candidate in "$skill_dir/SKILL.md" "$skill_dir/PROMPT.md" "$skill_dir/README.md" "$skill_dir/prompt.md" "$skill_dir/skill.md" "$skill_dir/index.md"; do
-                if [ -f "$candidate" ]; then
-                    cp "$candidate" "$COMMANDS_DIR/tob-${skill_name}.md"
-                    SKILL_COUNT=$((SKILL_COUNT + 1))
-                    break
-                fi
-            done
-        fi
-    done
-    echo "    ✓ $SKILL_COUNT Trail of Bits skills installed"
+if clone_once https://github.com/trailofbits/skills.git "$TOOLS_DIR/tob-skills"; then
+    echo "    ✓ $(install_tob_skills "$TOOLS_DIR/tob-skills") Trail of Bits skills installed"
 else
-    echo "    ✗ Trail of Bits skills unavailable"
+    echo "    ✗ Could not clone trailofbits/skills — skipping"
 fi
 
-# ── Trail of Bits: skills-curated (contains scv-scan) ────────────────
 echo "  → Trail of Bits skills-curated..."
-TOB_CURATED="$TOOLS_DIR/tob-skills-curated"
-if [ ! -d "$TOB_CURATED" ]; then
-    git clone --depth 1 https://github.com/trailofbits/skills-curated.git "$TOB_CURATED" 2>/dev/null || {
-        echo "    ✗ Could not clone trailofbits/skills-curated — skipping"
-        TOB_CURATED=""
-    }
-fi
-
-if [ -n "$TOB_CURATED" ] && [ -d "$TOB_CURATED" ]; then
-    CURATED_COUNT=0
-    for skill_dir in "$TOB_CURATED"/plugins/*/; do
-        if [ -d "$skill_dir" ]; then
-            skill_name=$(basename "$skill_dir")
-            for candidate in "$skill_dir/SKILL.md" "$skill_dir/PROMPT.md" "$skill_dir/README.md" "$skill_dir/prompt.md" "$skill_dir/skill.md" "$skill_dir/index.md"; do
-                if [ -f "$candidate" ]; then
-                    cp "$candidate" "$COMMANDS_DIR/tob-${skill_name}.md"
-                    CURATED_COUNT=$((CURATED_COUNT + 1))
-                    break
-                fi
-            done
-        fi
-    done
-    echo "    ✓ $CURATED_COUNT curated skills installed (includes scv-scan)"
+if clone_once https://github.com/trailofbits/skills-curated.git "$TOOLS_DIR/tob-skills-curated"; then
+    echo "    ✓ $(install_tob_skills "$TOOLS_DIR/tob-skills-curated") curated skills installed (includes scv-scan)"
 else
-    echo "    ✗ Trail of Bits curated skills unavailable"
+    echo "    ✗ Could not clone trailofbits/skills-curated — skipping"
 fi
 
 # ── forefy/.context ──────────────────────────────────────────────────

@@ -2,14 +2,18 @@
 // Suppress collapsible_if: clippy suggests `let` chains which are unstable (rust#53667)
 #![allow(clippy::collapsible_if)]
 
+mod bench;
 mod budget;
 mod cli;
 mod config;
+mod coverage;
+mod dashboard;
 mod docker;
 mod error;
 mod findings;
 mod known;
 mod passes;
+mod pin;
 mod pipeline;
 mod program;
 mod program_import;
@@ -44,6 +48,27 @@ async fn main() -> anyhow::Result<()> {
     // init creates bulwark.toml, so it cannot wait for one to load.
     if let Commands::Init(args) = cli.command {
         return cmd_init(args);
+    }
+    if let Commands::Bench(cmd) = cli.command {
+        return cmd_bench(cmd).await;
+    }
+    if let Commands::Dashboard(args) = &cli.command {
+        if let Some(root) = &args.workspace {
+            // A config, when one is at hand, tells the dashboard which files each agent owes.
+            let scope = [
+                Some(cli.config.clone()),
+                std::env::var("BULWARK_ROOT")
+                    .ok()
+                    .map(|r| PathBuf::from(r).join("bulwark.toml")),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|p| p.exists())
+            .and_then(|p| Config::load(&p).ok())
+            .map(|c| dashboard::status::Scope::from_config(&c))
+            .unwrap_or_default();
+            return dashboard::serve(Workspace::new(root, ""), scope, &args.bind, args.port).await;
+        }
     }
 
     // Resolve config: CWD first, then $BULWARK_ROOT fallback
@@ -99,7 +124,13 @@ async fn main() -> anyhow::Result<()> {
         Commands::Findings(args) => cmd_findings(config, audit_dir, args)?,
         Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
-        Commands::Init(_) => unreachable!("handled before the config loads"),
+        Commands::Init(_) | Commands::Bench(_) => unreachable!("handled before the config loads"),
+        Commands::Dashboard(args) => {
+            let ws = Workspace::new(&audit_dir, &config.workspace.path);
+            let mut scope = dashboard::status::Scope::from_config(&config);
+            scope.owed.drop_unmatchable(&audit_dir);
+            dashboard::serve(ws, scope, &args.bind, args.port).await?
+        }
         Commands::Doctor => cmd_doctor(config)?,
         Commands::Login => cmd_login()?,
         Commands::Program(cli::ProgramCmd::Import { url }) => {
@@ -107,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or_else(|| std::path::Path::new("."));
-            program_import::run(&url, dir).await?
+            program_import::run(&url, dir, &config.target).await?
         }
     }
 
@@ -129,7 +160,16 @@ async fn cmd_run(
     };
 
     let orchestrator = Orchestrator::new(config, audit_dir, bulwark_root, start, end, args.agent)?;
-    let results = orchestrator.run().await?;
+    let ledger = orchestrator.ledger();
+    let results = tokio::select! {
+        r = orchestrator.run() => r?,
+        sig = shutdown_signal() => {
+            // `docker stop` would otherwise leave every live session "running" on the dashboard.
+            ledger.stop_running()?;
+            eprintln!("\n  Stopped by {sig}; unfinished sessions marked stopped.");
+            std::process::exit(143);
+        }
+    };
 
     // Exit with error code if any pass failed
     if results
@@ -140,6 +180,15 @@ async fn cmd_run(
     }
 
     Ok(())
+}
+
+async fn shutdown_signal() -> &'static str {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install SIGTERM handler");
+    tokio::select! {
+        _ = term.recv() => "SIGTERM",
+        _ = tokio::signal::ctrl_c() => "SIGINT",
+    }
 }
 
 fn cmd_status(config: Config, audit_dir: PathBuf, args: cli::StatusArgs) -> anyhow::Result<()> {
@@ -471,24 +520,16 @@ math_sensitive = [
     # List contracts with complex arithmetic for extra scrutiny
 ]
 
-# Claude model per stage; these are the defaults. Pass 2 agents are keyed by name.
+# Every stage runs on Opus by default; override any stage by name. Pass 2 agents are keyed by name.
 # A table, so it must sit after every top-level key.
 # [models]
-# red              = "claude-opus-5-5"
-# gold             = "claude-opus-5-5"
-# blue             = "claude-sonnet-5-5"
-# scv_scan         = "claude-sonnet-5-5"
-# variant_analysis = "claude-sonnet-5-5"
-# fp_check         = "claude-opus-5-5"
-# poc              = "claude-opus-5-5"
-# fuzzing          = "claude-sonnet-5-5"
-# formal           = "claude-sonnet-5-5"
-# review           = "claude-opus-5-5"
+# blue     = "claude-sonnet-5-5"
+# fuzzing  = "claude-sonnet-5-5"
 
 [budget]
-# Hard cap on Claude spend for one run. Each pass gets its share of what is left;
-# PoCs are attempted highest severity first. Spend is recorded in <workspace>/cost.json.
-max_usd = 20.0
+# No cap by default, which suits a subscription. With an API key, set a hard cap: each pass
+# gets its share of what is left, PoCs go highest severity first, spend lands in cost.json.
+# max_usd = 50.0
 
 [workspace]
 path = "audit-workspace"
@@ -684,4 +725,54 @@ fn cmd_login() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn cmd_bench(cmd: cli::BenchCmd) -> anyhow::Result<()> {
+    match cmd {
+        cli::BenchCmd::Score {
+            expected,
+            workspace,
+            out,
+            label,
+            model,
+        } => {
+            let claude = which_claude();
+            let r = bench::score(bench::ScoreArgs {
+                expected: &expected,
+                workspace: &workspace,
+                out_dir: &out,
+                label: &label,
+                claude: &claude,
+                model: &model,
+            })
+            .await?;
+            println!("{}\n{}", bench::TABLE_HEADER, bench::table_row(&r));
+        }
+        cli::BenchCmd::Table { results } => {
+            let mut rows: Vec<serde_json::Value> = std::fs::read_dir(&results)?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "json"))
+                .filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
+                .collect();
+            rows.sort_by(|a, b| b["scored_at"].as_str().cmp(&a["scored_at"].as_str()));
+            println!("{}", bench::TABLE_HEADER);
+            for r in &rows {
+                println!("{}", bench::table_row(r));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn which_claude() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("{home}/.local/bin/claude"),
+        "/usr/local/bin/claude".into(),
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
+    .unwrap_or_else(|| PathBuf::from("claude"))
 }

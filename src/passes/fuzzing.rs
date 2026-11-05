@@ -39,63 +39,73 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             }
         }
     }
-    let tests_generated = generate_invariant_tests(ctx, &invariant_dir, &logs_dir).await;
+    let tests_generated = generate_invariant_tests(ctx, &invariant_dir, &logs_dir, None).await;
     if tests_generated == 0 {
-        eprintln!(
-            "  {} No invariant tests generated — check logs",
-            style("⚠").yellow()
-        );
-    } else {
-        eprintln!(
-            "  {} Generated {tests_generated} invariant test files",
-            style("✓").green()
-        );
+        return Err(nothing_ran("no invariant tests were generated; see logs"));
     }
+    eprintln!(
+        "  {} Generated {tests_generated} invariant test files",
+        style("✓").green()
+    );
 
     // ── Step 2: Compile invariant tests ─────────────────────────────
     let build_dir = ctx.build_dir();
+    let test_root = build_dir.join(crate::tools::forge::test_dir(&build_dir));
+    // A separate directory, so the project's own invariant files (e.g. their Handler.sol)
+    // are not overwritten.
+    let forge_test_dir = test_root.join("bulwark");
 
-    let tests_exist = count_sol_files(&invariant_dir) > 0;
+    // Failed PoC generation can leave comment-only stubs whose bad imports break the build.
+    clean_stub_poc_files(&test_root.join("pocs"));
 
-    // Copy generated tests into a SEPARATE directory to avoid overwriting the
-    // project's own test/invariant/ files (e.g. their Handler.sol).
-    let forge_test_dir = build_dir.join("test/bulwark");
-    if tests_exist {
-        std::fs::create_dir_all(&forge_test_dir)?;
-        copy_sol_files(&invariant_dir, &forge_test_dir)?;
-        sanitize_sol_unicode(&forge_test_dir);
-
-        let invariant_count = count_invariant_functions(&forge_test_dir)
-            + count_invariant_functions(&build_dir.join("test"));
-        eprintln!("  Found {invariant_count} invariant_ function(s) in test/invariant/");
-
-        // Remove stub/disabled PoC files before compiling — failed PoC generation sometimes
-        // leaves behind comment-only stubs (or files the AI "disabled") that still get compiled
-        // and can have bad imports that break the entire build.
-        clean_stub_poc_files(&build_dir.join("test/pocs"));
-
-        eprintln!("  Compiling invariant tests...");
-        // First attempt — may fail due to missing remappings
-        let build_result = crate::tools::forge::build(&forge_bin, &build_dir).await?;
-        let build_result = if !build_result.success {
-            // Patch any unresolved remappings detected in the build errors, then retry
-            let patched = patch_missing_remappings(&build_dir, &build_result.stderr);
-            if patched > 0 {
-                eprintln!("  Added {patched} missing remapping(s) — recompiling...");
-                crate::tools::forge::build(&forge_bin, &build_dir).await?
-            } else {
-                build_result
-            }
-        } else {
-            build_result
-        };
+    eprintln!("  Compiling invariant tests...");
+    let mut build_result =
+        compile_generated(&forge_bin, &build_dir, &invariant_dir, &forge_test_dir).await?;
+    for repair in 1..=MAX_COMPILE_REPAIRS {
         if build_result.success {
-            eprintln!("  {} Invariant tests compile", style("✓").green());
-        } else {
-            eprintln!("  {} Some tests failed to compile", style("⚠").yellow());
-            let _ = std::fs::write(logs_dir.join("invariant-build.log"), &build_result.stderr);
+            break;
         }
+        let _ = std::fs::write(
+            logs_dir.join(format!("invariant-build-{repair}.log")),
+            &build_result.stderr,
+        );
+        eprintln!(
+            "  {} Invariant tests failed to compile — repair {repair}/{MAX_COMPILE_REPAIRS}",
+            style("⚠").yellow()
+        );
+        let feedback = format!(
+            "## THE FILES IN THE OUTPUT DIRECTORY FAILED TO COMPILE\n\n\
+             They are copied to `{}` inside the project and built there with `forge build`. \
+             Fix them in place. Check every import against the remappings and foundry.toml above.\n\n\
+             ```\n{}\n```\n",
+            forge_test_dir
+                .strip_prefix(&build_dir)
+                .unwrap_or(&forge_test_dir)
+                .display(),
+            tail(&build_result.stderr, 60)
+        );
+        generate_invariant_tests(ctx, &invariant_dir, &logs_dir, Some(&feedback)).await;
+        build_result =
+            compile_generated(&forge_bin, &build_dir, &invariant_dir, &forge_test_dir).await?;
     }
+    if !build_result.success {
+        let _ = std::fs::write(logs_dir.join("invariant-build.log"), &build_result.stderr);
+        // Leaving them in place would break every later forge build in the project.
+        let _ = std::fs::remove_dir_all(&forge_test_dir);
+        return Err(nothing_ran(
+            "generated invariant tests do not compile; see invariant-build.log",
+        ));
+    }
+    eprintln!("  {} Invariant tests compile", style("✓").green());
+    eprintln!(
+        "  Found {} invariant_ function(s) under {}",
+        count_invariant_functions(&test_root),
+        test_root
+            .strip_prefix(&build_dir)
+            .unwrap_or(&test_root)
+            .display()
+    );
+    let tests_exist = true;
 
     // ── Step 3: Foundry invariant tests ─────────────────────────────
     let mut all_findings: Vec<Value> = Vec::new();
@@ -131,6 +141,11 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             "  Foundry: {} passed, {} failed",
             foundry_passed, foundry_failed
         );
+        if foundry_passed + foundry_failed == 0 {
+            return Err(nothing_ran(
+                "forge ran no invariant test; see foundry-invariant.log",
+            ));
+        }
 
         // Extract broken invariants as findings
         if foundry_failed > 0 {
@@ -246,10 +261,49 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     ))
 }
 
+const MAX_COMPILE_REPAIRS: usize = 2;
+
+fn nothing_ran(reason: &str) -> crate::error::BulwarkError {
+    crate::error::BulwarkError::NothingRan {
+        pass: "fuzzing".into(),
+        reason: reason.into(),
+    }
+}
+
+fn tail(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Replace the generated copies inside the project and build, patching remappings once.
+async fn compile_generated(
+    forge_bin: &Path,
+    build_dir: &Path,
+    invariant_dir: &Path,
+    forge_test_dir: &Path,
+) -> Result<crate::tools::forge::BuildResult> {
+    let _ = std::fs::remove_dir_all(forge_test_dir);
+    std::fs::create_dir_all(forge_test_dir)?;
+    copy_sol_files(invariant_dir, forge_test_dir)?;
+    sanitize_sol_unicode(forge_test_dir);
+
+    let result = crate::tools::forge::build(forge_bin, build_dir).await?;
+    if result.success {
+        return Ok(result);
+    }
+    let patched = patch_missing_remappings(build_dir, &result.stderr);
+    if patched == 0 {
+        return Ok(result);
+    }
+    eprintln!("  Added {patched} missing remapping(s) — recompiling...");
+    crate::tools::forge::build(forge_bin, build_dir).await
+}
+
 async fn generate_invariant_tests(
     ctx: &PipelineContext,
     invariant_dir: &Path,
     logs_dir: &Path,
+    repair: Option<&str>,
 ) -> usize {
     let prompt_path = ctx.resolve_prompt_path("invariant-generator.md");
 
@@ -280,16 +334,21 @@ async fn generate_invariant_tests(
          {test_infra}\n\n\
          ## Output Directory\n\n\
          Write ALL test files to this absolute path: {}\n\n\
-         Do not write anywhere else. Do not run forge build.\n",
-        invariant_dir.display()
+         Do not write anywhere else. Do not run forge build.\n{}",
+        invariant_dir.display(),
+        repair.map(|r| format!("\n{r}")).unwrap_or_default()
     );
 
     let session = ClaudeSession {
         claude_bin,
-        prompt,
+        prompt: format!("{prompt}{}", ctx.persona_section("fuzzing")),
         max_turns: ctx.config.passes.fuzzing.max_turns,
         working_dir: ctx.audit_dir.clone(),
-        log_file: logs_dir.join("invariant-generation.log"),
+        log_file: logs_dir.join(if repair.is_some() {
+            "invariant-repair.log"
+        } else {
+            "invariant-generation.log"
+        }),
         model: Some(ctx.config.model_for("fuzzing")),
         // No Bash — prevents Claude from running forge build in a compile-fix loop.
         // The pipeline compiles the generated files itself after this session ends.
@@ -304,6 +363,7 @@ async fn generate_invariant_tests(
         label: "fuzzing".into(),
         budget_usd: ctx.allowance("fuzzing").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session

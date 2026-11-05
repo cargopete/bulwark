@@ -44,11 +44,10 @@ pub fn rule_check(program: &ProgramConfig, f: &mut Finding) -> std::result::Resu
         .and_then(|a| a.as_str())
         .unwrap_or(&f.contract)
         .to_string();
-    if !program.has_asset(&asset) || !program.has_asset(&f.contract) {
-        return Err(reject(
-            "asset",
-            format!("{} is not a listed asset", f.contract),
-        ));
+    // The cited asset is where the impact lands; the code at fault may be a library or dependency
+    // compiled into it, which is never listed on its own.
+    if !program.has_asset(&asset) {
+        return Err(reject("asset", format!("{asset} is not a listed asset")));
     }
     let cited = f.extra.get("impact").and_then(|i| i.as_str()).unwrap_or("");
     let Some(impact) = program.impact(cited) else {
@@ -189,19 +188,18 @@ async fn classify(
         prompt,
         max_turns: 3,
         working_dir: ctx.audit_dir.clone(),
-        log_file: log_file.clone(),
+        log_file,
         model: Some(ctx.config.model_for("scope_check")),
         allowed_tools: vec!["Write".into()],
         timeout_minutes: Some(10),
         label: "scope_check".into(),
         budget_usd: cap,
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
     let _ = session.run_with_spinner("Scope classifier...").await;
 
-    let text = std::fs::read_to_string(&out_file)
-        .or_else(|_| std::fs::read_to_string(&log_file))
-        .ok()?;
+    let text = std::fs::read_to_string(&out_file).ok()?;
     let verdicts = first_json_array(&text)?;
     Some(parse_verdicts(&verdicts))
 }
@@ -314,6 +312,13 @@ text = "Temporary freezing of funds"
                 .rule,
             "D-8"
         );
+    }
+
+    #[test]
+    fn a_library_bug_counts_against_the_asset_it_is_compiled_into() {
+        let mut f = finding("RateLimitLib.sol", Some("I-1"));
+        f.extra.insert("asset".into(), json!("Vault"));
+        assert!(rule_check(&program(), &mut f).is_ok());
     }
 
     #[test]

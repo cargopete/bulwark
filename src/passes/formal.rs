@@ -436,7 +436,7 @@ async fn generate_symbolic_tests(
 
     let session = ClaudeSession {
         claude_bin,
-        prompt,
+        prompt: format!("{prompt}{}", ctx.persona_section("formal")),
         max_turns: ctx.config.passes.formal.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("halmos-generation.log"),
@@ -453,6 +453,7 @@ async fn generate_symbolic_tests(
         label: "formal".into(),
         budget_usd: ctx.allowance("formal").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session

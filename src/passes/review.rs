@@ -1,3 +1,4 @@
+use crate::coverage::Shallow;
 use crate::error::Result;
 
 use crate::pipeline::pass::PipelineContext;
@@ -47,6 +48,8 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     if let Some(ref review) = review_data {
         apply_review_adjustments(&mut all_findings, review, ctx);
     }
+    // Reinstated and fuzz/formal findings have not been through Pass 3's pin check.
+    crate::pin::tag(ctx, &mut all_findings);
 
     // Sort by severity descending
     all_findings.sort_by(|a, b| {
@@ -138,6 +141,7 @@ pub fn generate_report(ctx: &PipelineContext) -> Result<String> {
     if let Some(ref review) = review_data {
         apply_review_adjustments(&mut all_findings, review, ctx);
     }
+    crate::pin::tag(ctx, &mut all_findings);
 
     all_findings.sort_by(|a, b| {
         let sa = severity_rank(a.get("severity").and_then(|s| s.as_str()).unwrap_or(""));
@@ -227,7 +231,7 @@ async fn run_adversarial_review(
 
     let session = ClaudeSession {
         claude_bin,
-        prompt,
+        prompt: format!("{prompt}{}", ctx.persona_section("review")),
         max_turns: ctx.config.passes.review.max_turns,
         working_dir: ctx.audit_dir.clone(),
         log_file: logs_dir.join("adversarial-review.log"),
@@ -237,6 +241,7 @@ async fn run_adversarial_review(
         label: "review".into(),
         budget_usd: ctx.allowance("review").split(1),
         ledger: Some(ctx.ledger.clone()),
+        resume: None,
     };
 
     let _ = session
@@ -464,6 +469,27 @@ fn write_markdown_report(
         writeln!(f)?;
     }
 
+    let shallow: Vec<Shallow> = std::fs::read_to_string(ctx.workspace.shallow_sessions())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    if !shallow.is_empty() {
+        writeln!(f, "## ⚠ Shallow Agent Sessions")?;
+        writeln!(f)?;
+        writeln!(
+            f,
+            "These Pass 2 sessions were resumed once and still left work undone. \
+             The code they owed has had less scrutiny than the rest:"
+        )?;
+        writeln!(f)?;
+        for s in &shallow {
+            writeln!(f, "- **{}**: {}", s.agent, s.missing.join("; "))?;
+        }
+        writeln!(f)?;
+        writeln!(f, "---")?;
+        writeln!(f)?;
+    }
+
     // Unverifiable findings notice — findings that survived fp-check but couldn't get a PoC
     // due to build failures. They're real candidates, just unproven.
     let unverifiable_findings: Vec<&Value> = findings
@@ -536,8 +562,14 @@ fn write_markdown_report(
     if total > 0 {
         writeln!(f, "## Findings")?;
         writeln!(f)?;
-        writeln!(f, "| ID | Severity | Title | Contract | PoC Status |")?;
-        writeln!(f, "|----|----------|-------|----------|------------|")?;
+        writeln!(
+            f,
+            "| ID | Severity | Title | Contract | PoC Status | Scope Pin |"
+        )?;
+        writeln!(
+            f,
+            "|----|----------|-------|----------|------------|-----------|"
+        )?;
 
         for finding in findings {
             let id = finding.get("id").and_then(|v| v.as_str()).unwrap_or("-");
@@ -550,11 +582,12 @@ fn write_markdown_report(
                 .get("contract")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            let poc = finding
-                .get("poc_status")
+            let poc = poc_label(finding);
+            let pin = finding
+                .get("scope_pin")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            writeln!(f, "| {id} | {sev} | {title} | {contract} | {poc} |")?;
+            writeln!(f, "| {id} | {sev} | {title} | {contract} | {poc} | {pin} |")?;
         }
         writeln!(f)?;
 
@@ -593,10 +626,7 @@ fn write_markdown_report(
                 .get("attack_scenario")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-");
-            let poc_status = finding
-                .get("poc_status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let poc_status = poc_label(finding);
 
             writeln!(f, "### {id}: {title}")?;
             writeln!(f)?;
@@ -611,6 +641,24 @@ fn write_markdown_report(
             writeln!(f)?;
             writeln!(f, "**PoC status**: {poc_status}")?;
             writeln!(f)?;
+            if let Some(pin) = finding.get("scope_pin").and_then(|v| v.as_str()) {
+                let commit = finding
+                    .get("scope_pin_commit")
+                    .and_then(|v| v.as_str())
+                    .map(|c| format!(" at `{}`", &c[..c.len().min(10)]))
+                    .unwrap_or_default();
+                let note = finding
+                    .get("scope_pin_note")
+                    .and_then(|v| v.as_str())
+                    .map(|n| format!(" ({n})"))
+                    .unwrap_or_default();
+                writeln!(f, "**Scope pin**: {pin}{commit}{note}")?;
+                writeln!(f)?;
+                if let Some(diff) = finding.get("scope_pin_diff").and_then(|v| v.as_str()) {
+                    writeln!(f, "```diff\n{diff}\n```")?;
+                    writeln!(f)?;
+                }
+            }
             writeln!(f, "---")?;
             writeln!(f)?;
         }
@@ -753,6 +801,17 @@ fn resolve_challenge(
     }
 }
 
+fn poc_label(finding: &Value) -> String {
+    let status = finding
+        .get("poc_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    match finding.get("poc_mode").and_then(|v| v.as_str()) {
+        Some(mode) => format!("{status} ({mode})"),
+        None => status.to_string(),
+    }
+}
+
 fn count_severity(findings: &[Value], severity: &str) -> usize {
     findings
         .iter()
@@ -780,6 +839,13 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn poc_label_shows_the_mode_when_known() {
+        let f = json!({"poc_status": "demonstrated_local", "poc_mode": "local"});
+        assert_eq!(poc_label(&f), "demonstrated_local (local)");
+        assert_eq!(poc_label(&json!({"poc_status": "x"})), "x");
+    }
 
     fn program() -> ProgramConfig {
         toml::from_str(

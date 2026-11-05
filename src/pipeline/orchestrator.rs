@@ -57,6 +57,10 @@ impl Orchestrator {
         })
     }
 
+    pub fn ledger(&self) -> std::sync::Arc<Ledger> {
+        self.ctx.ledger.clone()
+    }
+
     pub async fn run(&self) -> Result<Vec<PassResult>> {
         self.print_banner();
         self.preflight()?;
@@ -99,6 +103,11 @@ impl Orchestrator {
         eprintln!();
 
         for pass_num in PassNumber::all() {
+            if claude::auth_failed() {
+                return Err(BulwarkError::ClaudeAuth(
+                    "fix the login and resume with --resume".into(),
+                ));
+            }
             let num = *pass_num as u8;
             if num < self.start_pass || num > self.end_pass {
                 continue;

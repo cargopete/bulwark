@@ -6,6 +6,12 @@ services:
     container_name: bulwark
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # A login carries the account's claude.ai connectors (Gmail, Slack, Drive). Agents read
+      # untrusted target code with Bash, so they must not have them.
+      - ENABLE_CLAUDEAI_MCP_SERVERS=false
+      # Optional authenticated RPC for fork-mode PoCs, fronted by a local anvil (see entrypoint).
+      - BULWARK_FORK_UPSTREAM=${BULWARK_FORK_UPSTREAM:-}
+      - BULWARK_FORK_UPSTREAM_TOKEN=${BULWARK_FORK_UPSTREAM_TOKEN:-}
       # BULWARK_ROOT = project dir (bulwark.toml + context/ + optional prompts/ overrides).
       # Set BULWARK_PROJECT on the host to point at your project directory.
       # Default: current directory (works when running from inside a project dir).
@@ -19,7 +25,7 @@ services:
       # Persist audit outputs and workspace between runs
       - audit-outputs:/home/auditor/audits
       # Mount host Claude credentials (login auth only — not the whole .claude dir)
-      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json:ro
+      - ${HOME}/.claude/.credentials.json:/home/auditor/.claude-host-creds/credentials.json
       # Reports land here on the host after each run
       - ./reports:/home/auditor/reports
     stdin_open: true
@@ -30,6 +36,23 @@ services:
         limits:
           memory: 16G
           cpus: "8"
+
+  # Live run dashboard: `docker compose up -d dashboard`, then `ssh -L 8484:localhost:8484 <host>`.
+  dashboard:
+    image: bulwark-audit-env
+    container_name: bulwark-dash
+    # The image keeps its own built-in bulwark.toml in /home/auditor, so start in the project.
+    working_dir: /home/auditor/project
+    entrypoint: ["/usr/local/bin/bulwark"]
+    command: ["dashboard", "--bind", "0.0.0.0"]
+    environment:
+      - BULWARK_INSTALL=/home/auditor
+    volumes:
+      - ${BULWARK_PROJECT:-.}:/home/auditor/project:ro
+      - audit-outputs:/home/auditor/audits:ro
+    ports:
+      - "127.0.0.1:8484:8484"
+    restart: unless-stopped
 
 volumes:
   audit-outputs:

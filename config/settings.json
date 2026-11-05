@@ -1,32 +1,13 @@
 {
   "permissions": {
     "allow": [
+      "Bash",
       "Read",
       "Write",
       "Edit",
       "Glob",
       "Grep",
-      "Bash(git *)",
-      "Bash(forge *)",
-      "Bash(slither *)",
-      "Bash(myth *)",
-      "Bash(solc *)",
-      "Bash(pnpm *)",
-      "Bash(npm *)",
-      "Bash(node *)",
-      "Bash(jq *)",
-      "Bash(cat *)",
-      "Bash(ls *)",
-      "Bash(find *)",
-      "Bash(wc *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(sort *)",
-      "Bash(grep *)",
-      "Bash(rg *)",
-      "Bash(diff *)",
-      "Bash(mkdir *)",
-      "Bash(cp *)"
+      "Skill"
     ],
     "deny": [
       "Bash(rm -rf *)",

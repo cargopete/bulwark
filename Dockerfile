@@ -91,7 +91,11 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir solc-select \
     && solc-select use 0.8.27
 
 # ── Create audit user (non-root for safety) ──────────────────────────
-RUN useradd -m -s /bin/bash auditor \
+# UID must match the host user, or the mounted 0600 credentials file is unreadable.
+# Ubuntu 24.04 ships an `ubuntu` user on 1000, so it goes first.
+ARG AUDITOR_UID=1000
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -m -s /bin/bash -u ${AUDITOR_UID} auditor \
     && echo "auditor ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER auditor
 WORKDIR /home/auditor
