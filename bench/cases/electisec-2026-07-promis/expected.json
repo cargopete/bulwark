@@ -1,0 +1,143 @@
+{
+  "case": "electisec-2026-07-promis",
+  "source": "https://github.com/electisec/reports/blob/main/public/pdf/2026-07-Promis-Smart-Contracts-report.pdf",
+  "findings": [
+    {
+      "id": "2.5.1",
+      "severity": "High",
+      "title": "Missing oracle price floor lets capped deposits overmint proUSD",
+      "contracts": [
+        "contracts/core/ProTokenOperations.sol",
+        "contracts/core/ProToken.sol"
+      ],
+      "functions": [
+        "_getUsdRepresentationProToken",
+        "_aggregateOraclePrices",
+        "setUSDPrice"
+      ],
+      "root_cause": "setUSDPrice enforces a 1e18 minimum proUSD price, but in oracle price-source mode _getUsdRepresentationProToken uses the aggregated oracle price directly with no floor, so a low oracle price overmints proUSD on deposits."
+    },
+    {
+      "id": "2.5.2",
+      "severity": "High",
+      "title": "Capped yAsset redemptions can overpay when the live price exceeds usdCap",
+      "contracts": [
+        "contracts/core/ProTokenOperations.sol"
+      ],
+      "functions": [
+        "_calculateUnmintAmount"
+      ],
+      "root_cause": "Redemption pricing divides by min(live yAsset price, usdCap), so when the live price is above the cap the user is paid out more yAsset than the USD value burned."
+    },
+    {
+      "id": "2.5.3",
+      "severity": "High",
+      "title": "proUSD price decreases can break StrategyVault withdrawal accounting",
+      "contracts": [
+        "contracts/vaults/ProTokenPlus/StrategyVault.sol",
+        "contracts/vaults/ProTokenPlus/ProTokenPlusOperations.sol"
+      ],
+      "functions": [
+        "_accrueGrowth",
+        "take",
+        "executeCompleteWithdraw"
+      ],
+      "root_cause": "_accrueGrowth only ratchets lastPrice upward and books freed proUSD as growth; a later price decrease (allowed by setUSDPrice) is never unwound, so withdrawals priced at the current rate exceed the already-reduced withdrawProUSD reserve and revert."
+    },
+    {
+      "id": "2.5.4",
+      "severity": "High",
+      "title": "1:1 unmint cap under-redeems proUSD when proUSD price is above 1 USD",
+      "contracts": [
+        "contracts/core/ProTokenOperations.sol"
+      ],
+      "functions": [
+        "_calculateUnmintAmount"
+      ],
+      "root_cause": "The unmint path caps the yAsset output at the nominal proUSD amount instead of its USD value, so when proUSD trades above 1 USD redeemers receive less than they burned."
+    },
+    {
+      "id": "2.5.5",
+      "severity": "High",
+      "title": "StrategyVault.claimYield() leaves withdrawProUSD overstated, breaking vault solvency",
+      "contracts": [
+        "contracts/vaults/ProTokenPlus/StrategyVault.sol"
+      ],
+      "functions": [
+        "claimYield",
+        "repay"
+      ],
+      "root_cause": "claimYield transfers the protocol-reward proUSD out of the vault without decrementing withdrawProUSD, so the reserve ledger overstates holdings and user withdrawals are bricked."
+    },
+    {
+      "id": "2.6.1",
+      "severity": "Medium",
+      "title": "Median-relative validation permits oracle spreads above the configured maximum",
+      "contracts": [
+        "contracts/core/ProTokenOperations.sol"
+      ],
+      "functions": [
+        "_validatePriceDeviation",
+        "_calculateMedianPrice"
+      ],
+      "root_cause": "Each source is compared to the median rather than to the other sources; with two sources the median is their mean, so the accepted spread between them is roughly twice the configured maxPriceDeviation."
+    },
+    {
+      "id": "2.6.2",
+      "severity": "Medium",
+      "title": "Queued unmint burns proUSD before the yAsset payout is guaranteed",
+      "contracts": [
+        "contracts/core/ProTokenUnmintHandler.sol"
+      ],
+      "functions": [
+        "finalizeUnmintRequest",
+        "_executeUnmint"
+      ],
+      "root_cause": "On approval _executeUnmint burns the escrowed proUSD before checking payout liquidity; if the queued batch is never processed and funded the user has lost the proUSD with no on-chain recourse."
+    },
+    {
+      "id": "2.6.3",
+      "severity": "Medium",
+      "title": "StrategyVault.regive() and StrategyVault.rotate() can underfund withdrawals",
+      "contracts": [
+        "contracts/vaults/ProTokenPlus/StrategyVault.sol",
+        "contracts/vaults/ProTokenPlus/ProTokenPlusOperations.sol"
+      ],
+      "functions": [
+        "regive",
+        "rotate",
+        "take",
+        "_executeInitiateWithdraw"
+      ],
+      "root_cause": "Starting an unbonding does not earmark any of the shared withdraw reserve, so regive/rotate can move reserve funds away before completeWithdraw, which then reverts WithdrawReserveUnderfunded."
+    },
+    {
+      "id": "2.6.4",
+      "severity": "Medium",
+      "title": "Algebra TWAP adaptor misdetects staleness via tick-cumulative equality",
+      "contracts": [
+        "contracts/oracles/OracleAlgebraAdaptor.sol"
+      ],
+      "functions": [
+        "_tryGetTWAP"
+      ],
+      "root_cause": "Equal tick cumulatives are treated as stale, but they just mean an average tick of 0 (price ~1.0), so stable/stable pools at parity revert StaleOracleData while genuine staleness goes undetected."
+    },
+    {
+      "id": "2.6.5",
+      "severity": "Medium",
+      "title": "Pull oracle adapters are unusable",
+      "contracts": [
+        "contracts/core/ProTokenOperations.sol",
+        "contracts/oracles/OraclePromisPullAdaptor.sol",
+        "contracts/oracles/OracleRedStoneAdaptor.sol"
+      ],
+      "functions": [
+        "_aggregateOraclePrices",
+        "getOraclePriceForAsset"
+      ],
+      "root_cause": "The only call site passes empty bytes as oracle data, but both pull adaptors require a signed payload, so configuring either as a price source makes every mint and unmint revert."
+    }
+  ],
+  "others": []
+}

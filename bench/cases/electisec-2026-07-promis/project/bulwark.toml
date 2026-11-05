@@ -1,0 +1,53 @@
+# Bench case: Promis Smart Contracts (Electisec (yAudit) private engagement), findings published 2026-07-28.
+
+[target]
+repo = "https://github.com/promis-finance/promis-contracts.git"
+branch = "main"
+commit = "4cd2d43122bf10c173b16d9a017415f35839c003"
+scope = ["."]
+pre_build_cmd = "bash /home/auditor/project/prebuild.sh"
+core_contracts = ["ProToken", "ProTokenOperations", "ProTokenSettings", "ProTokenUnmintHandler", "YAssetOperationsHandler", "ProTokenPlus", "ProTokenPlusOperations", "StrategyVault"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "core"
+files = ["contracts/core/ProToken.sol", "contracts/core/ProTokenOperations.sol", "contracts/core/ProTokenSettings.sol", "contracts/core/ProTokenUnmintHandler.sol", "contracts/core/YAssetOperationsHandler.sol"]
+
+[[passes.agents.components]]
+name = "protokenplus"
+files = ["contracts/vaults/ProTokenPlus/ProTokenPlus.sol", "contracts/vaults/ProTokenPlus/ProTokenPlusOperations.sol", "contracts/vaults/ProTokenPlus/StrategyVault.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

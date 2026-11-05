@@ -1,0 +1,119 @@
+{
+  "case": "cantina-2026-07-sprinter-stash-contracts",
+  "source": "https://cdn.cantina.xyz/reports/report-cli-cantina-73172f59-39c4-4ece-8b08-bd387bd88cbb-2026-07-14-sprinter-stash-contracts.pdf",
+  "findings": [
+    {
+      "id": "3.1.1",
+      "severity": "High",
+      "title": "Gnosis Omnibridge rebalances bypass destination pool accounting",
+      "contracts": [
+        "contracts/Rebalancer.sol",
+        "contracts/utils/GnosisOmnibridgeAdapter.sol"
+      ],
+      "functions": [
+        "initiateRebalance",
+        "initiateTransferGnosisOmnibridge"
+      ],
+      "root_cause": "Ethereum-to-Gnosis Omnibridge rebalances withdraw from the source pool and bridge tokens straight to the destination pool, with no destination-side processRebalance that calls deposit(), so the destination pool's totalDeposited never records the liquidity."
+    },
+    {
+      "id": "3.2.1",
+      "severity": "Medium",
+      "title": "StashDex direct repayments can ignore accrued Aave interest",
+      "contracts": [
+        "contracts/StashDex.sol",
+        "contracts/LiquidityPoolAave.sol"
+      ],
+      "functions": [
+        "repay",
+        "forward",
+        "_setPool"
+      ],
+      "root_cause": "StashDex and the pool's directDebt track only nominal borrowed principal, so after repaying it both read zero while Aave variable debt from accrued interest remains, and forward()/_setPool() then treat the debt as settled."
+    },
+    {
+      "id": "3.2.2",
+      "severity": "Medium",
+      "title": "Gnosis Omnibridge repayments can deliver the wrong USDC variant",
+      "contracts": [
+        "contracts/utils/GnosisOmnibridgeAdapter.sol"
+      ],
+      "functions": [
+        "initiateTransferGnosisOmnibridge",
+        "processTransferGnosisOmnibridge"
+      ],
+      "root_cause": "The adapter converts USDCe to USDCxDAI on Gnosis-to-Ethereum transfers but does no matching conversion on Ethereum-to-Gnosis, so repayments can arrive as USDCxDAI at a pool whose debt is in USDCe."
+    },
+    {
+      "id": "3.2.3",
+      "severity": "Medium",
+      "title": "Aave withdrawProfit shortfall borrow skips token LTV checks",
+      "contracts": [
+        "contracts/LiquidityPoolAave.sol",
+        "contracts/LiquidityPool.sol"
+      ],
+      "functions": [
+        "_withdrawProfitLogic",
+        "withdrawProfit"
+      ],
+      "root_cause": "When balance is below the profit to withdraw, _withdrawProfitLogic borrows the shortfall from Aave and checks only the health factor, skipping the per-token _checkTokenLTV cap every other borrow path enforces."
+    },
+    {
+      "id": "3.2.4",
+      "severity": "Medium",
+      "title": "Aave repayDirect reverts when direct debt exists but Aave debt is zero",
+      "contracts": [
+        "contracts/LiquidityPoolAave.sol"
+      ],
+      "functions": [
+        "_repayTokenDirect",
+        "repayDirect"
+      ],
+      "root_cause": "_repayTokenDirect sizes the Aave repayment from directDebt without capping it to the actual Aave variable debt, so when Aave debt is zero the repay reverts and direct debt cannot be settled."
+    },
+    {
+      "id": "3.2.5",
+      "severity": "Medium",
+      "title": "Gnosis AMB executeSignatures can skip rebalance accounting",
+      "contracts": [
+        "contracts/utils/GnosisOmnibridgeAdapter.sol",
+        "contracts/Rebalancer.sol"
+      ],
+      "functions": [
+        "processTransferGnosisOmnibridge",
+        "processRebalance"
+      ],
+      "root_cause": "The Gnosis AMB executeSignatures entry point is permissionless; if a third party finalises the message first, tokens land in the destination pool and the Rebalancer's processing (which calls deposit()) no longer runs, so the principal goes unaccounted."
+    },
+    {
+      "id": "3.2.6",
+      "severity": "Medium",
+      "title": "Attacker can force the operator requirement on a user's withdrawals via allowances",
+      "contracts": [
+        "contracts/LiquidityHub.sol"
+      ],
+      "functions": [
+        "_withdraw",
+        "requestRedeem"
+      ],
+      "root_cause": "requestRedeem lets anyone credit redeemRequests for an arbitrary controller, and _withdraw routes any pending amount through a branch that requires operator authorisation, so a 1-wei request breaks allowance-based withdrawals for that user."
+    },
+    {
+      "id": "3.2.7",
+      "severity": "Medium",
+      "title": "claimableRedeemRequest over-reports causing fulfilRedeem to revert",
+      "contracts": [
+        "contracts/LiquidityHub.sol",
+        "contracts/LiquidityPoolAave.sol"
+      ],
+      "functions": [
+        "claimableRedeemRequest",
+        "fulfilRedeem",
+        "maxRedeem",
+        "maxWithdraw"
+      ],
+      "root_cause": "The hub sizes claimable assets from LIQUIDITY_POOL.balance(), which for Aave pools includes funds above totalDeposited, while pool.withdraw() is bounded by totalDeposited, so fulfilRedeem requests more than can be withdrawn and the whole batch reverts."
+    }
+  ],
+  "others": []
+}

@@ -1,0 +1,53 @@
+# Bench case: Sprinter: Stash Contracts (Cantina Managed (private engagement, public report)), findings published 2026-08-03.
+
+[target]
+repo = "https://github.com/sprintertech/sprinter-stash-contracts.git"
+branch = "main"
+commit = "917bb28a0774424d6d83cc50b4c9b199527a57c6"
+scope = ["."]
+pre_build_cmd = "bash /home/auditor/project/prebuild.sh"
+core_contracts = ["LiquidityHub", "LiquidityPool", "LiquidityPoolAave", "LiquidityPoolAaveLongTerm", "LiquidityPoolStablecoin", "PaxosOracle", "Processor", "Rebalancer", "Repayer", "StashDex", "StashDexProcessor", "SubProcessor", "AcrossAdapter", "AdapterHelper", "ArbitrumGatewayAdapter", "CCTPV2Adapter", "GnosisOmnibridgeAdapter", "HelperLib", "LayerZeroHelper", "StargateAdapter", "SuperchainStandardBridgeAdapter", "USDT0Adapter"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "contracts"
+files = ["contracts/LiquidityHub.sol", "contracts/LiquidityPool.sol", "contracts/LiquidityPoolAave.sol", "contracts/LiquidityPoolAaveLongTerm.sol", "contracts/LiquidityPoolStablecoin.sol", "contracts/PaxosOracle.sol", "contracts/Processor.sol", "contracts/Rebalancer.sol", "contracts/Repayer.sol", "contracts/StashDex.sol", "contracts/StashDexProcessor.sol", "contracts/SubProcessor.sol"]
+
+[[passes.agents.components]]
+name = "utils"
+files = ["contracts/utils/AcrossAdapter.sol", "contracts/utils/AdapterHelper.sol", "contracts/utils/ArbitrumGatewayAdapter.sol", "contracts/utils/CCTPV2Adapter.sol", "contracts/utils/GnosisOmnibridgeAdapter.sol", "contracts/utils/HelperLib.sol", "contracts/utils/LayerZeroHelper.sol", "contracts/utils/StargateAdapter.sol", "contracts/utils/SuperchainStandardBridgeAdapter.sol", "contracts/utils/USDT0Adapter.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"
