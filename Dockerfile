@@ -94,9 +94,9 @@ RUN /opt/solidity-tools/bin/pip install --no-cache-dir solc-select \
 ARG MEDUSA_VERSION=v1.5.1
 ARG ECHIDNA_VERSION=2.3.3
 RUN ln -sf /opt/solidity-tools/bin/crytic-compile /usr/local/bin/crytic-compile \
-    && curl -fsSL "https://github.com/crytic/medusa/releases/download/${MEDUSA_VERSION}/medusa-linux-x64.tar.gz" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/crytic/medusa/releases/download/${MEDUSA_VERSION}/medusa-linux-x64.tar.gz" \
         | tar -xz -C /usr/local/bin medusa \
-    && curl -fsSL "https://github.com/crytic/echidna/releases/download/v${ECHIDNA_VERSION}/echidna-${ECHIDNA_VERSION}-x86_64-linux.tar.gz" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/crytic/echidna/releases/download/v${ECHIDNA_VERSION}/echidna-${ECHIDNA_VERSION}-x86_64-linux.tar.gz" \
         | tar -xz -C /usr/local/bin echidna \
     && medusa --version && echidna --version
 
