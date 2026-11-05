@@ -7,7 +7,8 @@
       "Edit",
       "Glob",
       "Grep",
-      "Skill"
+      "Skill",
+      "WebFetch"
     ],
     "deny": [
       "Bash(rm -rf *)",
