@@ -10,7 +10,7 @@ use std::path::Path;
 ///
 /// 1. Claude generates one suite from PROPERTIES.md that all three fuzzers run
 /// 2. Forge runs it, on fork state when the config pins a fork
-/// 3. Medusa and Echidna run it side by side, deploying `CryticTester`
+/// 3. Medusa, then Echidna, run it by deploying `CryticTester`
 /// 4. Each broken invariant is classified; only real violations become findings
 pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let fuzz_dir = ctx.workspace.fuzzing_dir();
