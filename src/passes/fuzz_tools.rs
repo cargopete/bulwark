@@ -123,7 +123,15 @@ pub fn parse_forge(out: &str) -> ToolRun {
 
 // ── Medusa ──────────────────────────────────────────────────────────
 
-pub fn medusa_config(corpus: &Path, timeout_s: u64, workers: usize, fork: Option<&Fork>) -> Value {
+/// `project` must be absolute: Medusa resolves a relative target against the config file's
+/// directory, not its working directory.
+pub fn medusa_config(
+    project: &Path,
+    corpus: &Path,
+    timeout_s: u64,
+    workers: usize,
+    fork: Option<&Fork>,
+) -> Value {
     json!({
         "fuzzing": {
             "workers": workers,
@@ -170,7 +178,7 @@ pub fn medusa_config(corpus: &Path, timeout_s: u64, workers: usize, fork: Option
         "compilation": {
             "platform": "crytic-compile",
             "platformConfig": {
-                "target": ".",
+                "target": project,
                 "solcVersion": "",
                 "exportDirectory": "",
                 "args": ["--foundry-compile-all"]
@@ -423,7 +431,14 @@ Corpus size: 12";
             rpc: "http://127.0.0.1:8545".into(),
             block: 123,
         };
-        let m = medusa_config(Path::new("/w/corpus/medusa"), 600, 4, Some(&fork));
+        let m = medusa_config(
+            Path::new("/a/proj"),
+            Path::new("/w/corpus/medusa"),
+            600,
+            4,
+            Some(&fork),
+        );
+        assert_eq!(m["compilation"]["platformConfig"]["target"], "/a/proj");
         assert_eq!(m["fuzzing"]["targetContracts"][0], TESTER);
         assert_eq!(
             m["fuzzing"]["testing"]["propertyTesting"]["testPrefixes"][0],
@@ -435,7 +450,7 @@ Corpus size: 12";
         );
         assert_eq!(m["fuzzing"]["chainConfig"]["forkConfig"]["rpcBlock"], 123);
         assert_eq!(m["fuzzing"]["corpusDirectory"], "/w/corpus/medusa");
-        let local = medusa_config(Path::new("/c"), 600, 4, None);
+        let local = medusa_config(Path::new("/p"), Path::new("/c"), 600, 4, None);
         assert_eq!(
             local["fuzzing"]["chainConfig"]["forkConfig"]["forkModeEnabled"],
             false

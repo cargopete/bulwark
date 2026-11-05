@@ -169,9 +169,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         ));
     }
 
-    // ── Step 4: Medusa and Echidna, side by side ────────────────────
+    // ── Step 4: Medusa, then Echidna ────────────────────────────────
+    // One after the other: each compiles through crytic-compile, which starts with `forge clean`.
     let corpus = fuzz_dir.join("corpus");
-    let half = (workers / 2).max(1);
     let (medusa_run, echidna_run) = if !find_contract(&forge_test_dir, TESTER) {
         let note = format!("suite has no {TESTER} contract");
         eprintln!(
@@ -180,10 +180,25 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
         (skipped("medusa", &note), skipped("echidna", &note))
     } else {
-        tokio::join!(
-            run_medusa(ctx, &build_dir, &corpus, &results_dir, half, fork.as_ref()),
-            run_echidna(ctx, &build_dir, &corpus, &results_dir, half, fork.as_ref()),
+        let m = run_medusa(
+            ctx,
+            &build_dir,
+            &corpus,
+            &results_dir,
+            workers,
+            fork.as_ref(),
         )
+        .await;
+        let e = run_echidna(
+            ctx,
+            &build_dir,
+            &corpus,
+            &results_dir,
+            workers,
+            fork.as_ref(),
+        )
+        .await;
+        (m, e)
     };
     for r in [&medusa_run, &echidna_run] {
         match &r.note {
@@ -303,7 +318,8 @@ async fn run_medusa(
     };
     let timeout_s = ctx.config.passes.fuzzing.medusa_timeout;
     let config = results.join("medusa.json");
-    let cfg = fuzz_tools::medusa_config(&corpus.join("medusa"), timeout_s, workers, fork);
+    let cfg =
+        fuzz_tools::medusa_config(build_dir, &corpus.join("medusa"), timeout_s, workers, fork);
     if std::fs::write(
         &config,
         serde_json::to_string_pretty(&cfg).unwrap_or_default(),
