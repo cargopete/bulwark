@@ -131,33 +131,21 @@ if [ -f "package.json" ]; then
 fi
 
 # ── Stage context files ─────────────────────────────────────────────
-# Priority: project context/ > built-in context/
-# ATTACK_PATTERNS.md always comes from the install (accumulated generic knowledge).
+# From the context/ beside the config in use. The install's copies describe The Graph, so a
+# target without its own gets AUDIT_CONTEXT.md and PROPERTIES.md derived in Pass 1. The pipeline
+# removes stale copies on a run from Pass 1.
 echo "→ Staging audit context files..."
-
-stage_context_file() {
-    local filename="$1"
-    local install_only="${2:-false}"
-    local dest="$AUDIT_DIR/$filename"
-
-    # Project context always overwrites — stale files from previous runs on different
-    # targets must not persist. ATTACK_PATTERNS.md is install-only (generic knowledge).
-    if [ "$install_only" = "false" ] && [ -f "/home/auditor/project/context/$filename" ]; then
-        cp "/home/auditor/project/context/$filename" "$dest"
-        echo "  ✓ $filename (from project)"
-    elif [ ! -f "$dest" ] && [ -f "/home/auditor/context/$filename" ] \
-        && { [ "$install_only" = "true" ] || [ "$PROJECT_CONFIG" = "/home/auditor/bulwark.toml" ]; }; then
-        # The install's protocol context describes The Graph: a default for the built-in
-        # config only. Any other target without its own gets one derived in Pass 1.
-        cp "/home/auditor/context/$filename" "$dest"
-        echo "  ✓ $filename (from install)"
+if [ "$PROJECT_CONFIG" = "/home/auditor/bulwark.toml" ]; then
+    CONTEXT_SRC=/home/auditor/context
+else
+    CONTEXT_SRC=/home/auditor/project/context
+fi
+for f in AUDIT_CONTEXT.md PROPERTIES.md KNOWN_ISSUES.md ATTACK_PATTERNS.md; do
+    if [ -f "$CONTEXT_SRC/$f" ]; then
+        cp "$CONTEXT_SRC/$f" "$AUDIT_DIR/$f"
+        echo "  ✓ $f"
     fi
-}
-
-stage_context_file "AUDIT_CONTEXT.md"
-stage_context_file "PROPERTIES.md"
-stage_context_file "KNOWN_ISSUES.md"
-stage_context_file "ATTACK_PATTERNS.md" "true"  # always from install
+done
 
 # Create a minimal CLAUDE.md if not present
 if [ ! -f "$AUDIT_DIR/CLAUDE.md" ]; then
