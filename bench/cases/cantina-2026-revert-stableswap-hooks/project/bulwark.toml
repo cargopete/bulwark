@@ -1,0 +1,62 @@
+# Bench case: Revert Finance StableSwap Hooks, Cantina competition 2026-04-30..05-07.
+# Findings published 2026-07-10, after the agents' training cutoff.
+
+[target]
+repo = "https://github.com/revert-finance/stableswap-hooks.git"
+branch = "main"
+commit = "cf0c30e576f144809df9819f4d3ad49e0b7fe2d7"
+scope = ["."]
+core_contracts = ["StableSwapHooks", "Liquidity", "Swap", "Fees", "Amp", "Base", "StableSwapMath", "StableSwapHooksFactory", "StableSwapZapIn"]
+math_sensitive = ["StableSwapMath", "Swap", "Liquidity", "Fees", "StableSwapZapIn"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "liquidity-and-hooks"
+files = ["src/Liquidity.sol", "src/Base.sol", "src/StableSwapHooks.sol", "src/libraries/Actions.sol"]
+
+[[passes.agents.components]]
+name = "swap-and-fees"
+files = ["src/Swap.sol", "src/Fees.sol", "src/Amp.sol"]
+
+[[passes.agents.components]]
+name = "stableswap-math"
+files = ["src/libraries/StableSwapMath.sol"]
+
+[[passes.agents.components]]
+name = "factory-and-zap"
+files = ["src/factories/StableSwapHooksFactory.sol", "src/periphery/StableSwapZapIn.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"
