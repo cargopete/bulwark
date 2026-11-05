@@ -145,7 +145,10 @@ stage_context_file() {
     if [ "$install_only" = "false" ] && [ -f "/home/auditor/project/context/$filename" ]; then
         cp "/home/auditor/project/context/$filename" "$dest"
         echo "  ✓ $filename (from project)"
-    elif [ ! -f "$dest" ] && [ -f "/home/auditor/context/$filename" ]; then
+    elif [ ! -f "$dest" ] && [ -f "/home/auditor/context/$filename" ] \
+        && { [ "$install_only" = "true" ] || [ "$PROJECT_CONFIG" = "/home/auditor/bulwark.toml" ]; }; then
+        # The install's protocol context describes The Graph: a default for the built-in
+        # config only. Any other target without its own gets one derived in Pass 1.
         cp "/home/auditor/context/$filename" "$dest"
         echo "  ✓ $filename (from install)"
     fi

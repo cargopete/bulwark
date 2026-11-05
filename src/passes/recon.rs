@@ -120,6 +120,13 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         );
     }
 
+    // ── 1.3a Derive missing audit context ─────────────────────────
+    match derive_missing_context(ctx, &recon_dir).await {
+        Ok(Some(written)) => eprintln!("    {} Derived {written}", style("✓").green()),
+        Ok(None) => {}
+        Err(e) => eprintln!("    {} Context derivation failed: {e}", style("⚠").yellow()),
+    }
+
     // ── 1.3b AI-assisted vulnerability scan (scv-scan) ────────────
     if ctx.config.passes.recon.scv_scan {
         eprintln!("  Running AI vulnerability scan (scv-scan)...");
@@ -973,6 +980,62 @@ async fn run_scv_scan(ctx: &PipelineContext, recon_dir: &Path) -> Result<String>
             Ok("completed (no findings captured)".into())
         }
     }
+}
+
+/// A target without hand-written AUDIT_CONTEXT.md or PROPERTIES.md gets them derived from its
+/// code and docs, so later passes do not run against nothing.
+async fn derive_missing_context(ctx: &PipelineContext, recon_dir: &Path) -> Result<Option<String>> {
+    let missing: Vec<&str> = ["AUDIT_CONTEXT.md", "PROPERTIES.md"]
+        .into_iter()
+        .filter(|f| !ctx.audit_dir.join(f).exists())
+        .collect();
+    if missing.is_empty() || !ctx.config.has_tool("claude") {
+        return Ok(None);
+    }
+    eprintln!(
+        "  Deriving {} from the code and docs...",
+        missing.join(" and ")
+    );
+    let base = std::fs::read_to_string(ctx.resolve_prompt_path("context-generator.md"))?;
+    let files: Vec<String> = ctx
+        .config
+        .target
+        .scope
+        .iter()
+        .flat_map(|pkg| find_sol_files(&sol_root(&ctx.audit_dir.join(pkg))))
+        .filter_map(|p| {
+            p.strip_prefix(&ctx.audit_dir)
+                .ok()
+                .map(|r| r.display().to_string())
+        })
+        .collect();
+    let outputs: String = missing
+        .iter()
+        .map(|f| format!("- {}\n", ctx.audit_dir.join(f).display()))
+        .collect();
+    let session = ClaudeSession {
+        claude_bin: ctx.config.resolve_tool("claude")?,
+        prompt: format!(
+            "{base}\n## In-scope files\n\n{}\n\n## Output files to write\n\n{outputs}",
+            files.join("\n")
+        ),
+        max_turns: 120,
+        working_dir: ctx.audit_dir.clone(),
+        log_file: recon_dir.join("context-generation.log"),
+        model: Some(ctx.config.model_for("recon")),
+        allowed_tools: vec!["Read".into(), "Glob".into(), "Grep".into(), "Write".into()],
+        timeout_minutes: Some(30),
+        label: "context".into(),
+        budget_usd: ctx.allowance("recon").split(1),
+        ledger: Some(ctx.ledger.clone()),
+        resume: None,
+    };
+    session.run().await?;
+    let written: Vec<&str> = missing
+        .into_iter()
+        .filter(|f| ctx.audit_dir.join(f).exists())
+        .collect();
+    Ok((!written.is_empty()).then(|| written.join(" and ")))
 }
 
 /// Validate that all core_contracts in config are actually found in compiled source.
