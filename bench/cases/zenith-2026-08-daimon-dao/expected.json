@@ -1,0 +1,134 @@
+{
+  "case": "zenith-2026-08-daimon-dao",
+  "source": "https://github.com/zenith-security/reports/blob/main/reports/Daimon%20DAO%20-%20Zenith%20Audit%20Report.pdf",
+  "findings": [
+    {
+      "id": "C-1",
+      "severity": "Critical",
+      "title": "Same-timestamp staking injects post-snapshot voting power",
+      "contracts": [
+        "src/DaimonGovernor.sol",
+        "src/DaimonStaking.sol"
+      ],
+      "functions": [
+        "propose",
+        "votingPowerAt"
+      ],
+      "root_cause": "propose() snapshots totalVotingPower at block.timestamp, but votingPowerAt() accepts checkpoints with timestamp <= the snapshot, so power staked later in the same transaction counts for the attacker's vote while being absent from the quorum denominator."
+    },
+    {
+      "id": "H-1",
+      "severity": "High",
+      "title": "Mutable quorum retroactively changes completed proposal outcomes",
+      "contracts": [
+        "src/DaimonGovernor.sol"
+      ],
+      "functions": [
+        "state",
+        "queue",
+        "execute",
+        "setQuorumBps"
+      ],
+      "root_cause": "The Governor snapshots total voting power but evaluates every proposal against the current global quorumBps, so changing quorum revives defeated proposals (which never expire) or defeats already-queued ones."
+    },
+    {
+      "id": "M-1",
+      "severity": "Medium",
+      "title": "Automatic fee sales can under-mint liquidity additions",
+      "contracts": [
+        "src/DaimonV2.sol"
+      ],
+      "functions": [
+        "_transfer",
+        "_swapAccumulatedFees"
+      ],
+      "root_cause": "Every transfer to the pair is treated as a sale, so the router's addLiquidityETH transfer triggers an automatic fee swap after the router has priced the contribution, leaving the LP with stale ratios and fewer LP tokens."
+    },
+    {
+      "id": "M-2",
+      "severity": "Medium",
+      "title": "Uncaught automation failures can block sells and liquidity bootstrap",
+      "contracts": [
+        "src/DaimonV2.sol"
+      ],
+      "functions": [
+        "_transfer",
+        "_swapAccumulatedFees",
+        "_buyBackAndBurn"
+      ],
+      "root_cause": "Fee sales, buybacks and payouts run synchronously inside _transfer before the user's transfer with no failure isolation, so any revert in the automation reverts sells and liquidity adds."
+    },
+    {
+      "id": "M-3",
+      "severity": "Medium",
+      "title": "Dust transfers bypass aggregate automation pacing",
+      "contracts": [
+        "src/DaimonV2.sol"
+      ],
+      "functions": [
+        "_transfer",
+        "_swapAccumulatedFees",
+        "_buyBackAndBurn"
+      ],
+      "root_cause": "Per-call limits are the only constraint on automated fee sales and buybacks; there is no per-block or per-epoch cap, so repeated dust transfers to the pair trigger the automation as often as an attacker likes."
+    },
+    {
+      "id": "M-4",
+      "severity": "Medium",
+      "title": "Reflections accrued by the AMM pair can be permissionlessly skimmed",
+      "contracts": [
+        "src/DaimonV2.sol"
+      ],
+      "functions": [
+        "initialize",
+        "_reflectFee",
+        "balanceOf"
+      ],
+      "root_cause": "Only deadAddress is excluded from reflections, so the PancakeSwap pair's balance grows with reflection fees above its reserves and anyone can skim() the excess."
+    },
+    {
+      "id": "M-5",
+      "severity": "Medium",
+      "title": "Reflection accrued by Staking is unrecoverable through current interfaces",
+      "contracts": [
+        "src/DaimonV2.sol",
+        "src/DaimonStaking.sol"
+      ],
+      "functions": [
+        "balanceOf",
+        "_reflectFee"
+      ],
+      "root_cause": "The Staking contract is fee-excluded but still reflection-included, so its token balance grows passively beyond tracked principal and no function can distribute or recover that surplus."
+    },
+    {
+      "id": "M-6",
+      "severity": "Medium",
+      "title": "A minimal first stake can atomically capture the zero-staker reward backlog",
+      "contracts": [
+        "src/DaimonStaking.sol"
+      ],
+      "functions": [
+        "notifyReward",
+        "stake"
+      ],
+      "root_cause": "Rewards arriving while totalVotingPower is zero accumulate in undistributedRewards and the next notification distributes the whole backlog to current stakers, so a 1-wei first stake captures it all."
+    },
+    {
+      "id": "M-7",
+      "severity": "Medium",
+      "title": "Guardian can indefinitely censor governance and preserve a global pause",
+      "contracts": [
+        "src/DaimonV2.sol",
+        "src/DaimonGovernor.sol",
+        "src/DaimonTimelock.sol",
+        "script/Deploy.s.sol"
+      ],
+      "functions": [
+        "setPaused",
+        "cancel"
+      ],
+      "root_cause": "guardianExpiry only stops a new pause from being set; a pause set before expiry persists, and the same guardian's Governor cancel and Timelock CANCELLER_ROLE powers never expire, so the guardian can block governance from lifting it."
+    }
+  ],
+  "others": []
+}

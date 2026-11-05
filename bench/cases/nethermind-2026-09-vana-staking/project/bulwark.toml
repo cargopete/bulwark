@@ -1,0 +1,60 @@
+# Bench case: Vana Staking (NM-1052) (Nethermind Security private engagement), findings published 2026-10-07.
+
+[target]
+repo = "https://github.com/vana-com/vana-smart-contracts.git"
+branch = "callum/moksha-equal-reserve-seeding"
+commit = "e6c258a6cb3723ec69125c2eb01293ad7be6b393"
+scope = ["."]
+core_contracts = ["RewardSplitterImplementation", "VanaPoolEntityImplementation", "VanaPoolStakingImplementation", "VanaPoolTreasuryImplementation"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "rewardsplitter"
+files = ["contracts/vanaStaking/rewardSplitter/RewardSplitterImplementation.sol"]
+
+[[passes.agents.components]]
+name = "vanapoolentity"
+files = ["contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol"]
+
+[[passes.agents.components]]
+name = "vanapoolstaking"
+files = ["contracts/vanaStaking/vanaPoolStaking/VanaPoolStakingImplementation.sol"]
+
+[[passes.agents.components]]
+name = "vanapooltreasury"
+files = ["contracts/vanaStaking/vanaPoolTreasury/VanaPoolTreasuryImplementation.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

@@ -1,0 +1,56 @@
+# Bench case: 3Jane LCC Review (Guardian private engagement), findings published 2026-09-14.
+
+[target]
+repo = "https://github.com/3jane-protocol/moneymarket-contracts.git"
+branch = "main"
+commit = "777accc692f1a87e2ba1367695cacd15a5a5e8a8"
+scope = ["."]
+core_contracts = ["LCCVault", "LCCVaultFactory", "ConstantsLib", "ProtocolConfigLib", "NotificationVault", "USD3"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "lcc"
+files = ["src/lcc/LCCVault.sol", "src/lcc/LCCVaultFactory.sol"]
+
+[[passes.agents.components]]
+name = "libraries"
+files = ["src/libraries/ConstantsLib.sol", "src/libraries/ProtocolConfigLib.sol"]
+
+[[passes.agents.components]]
+name = "usd3"
+files = ["src/usd3/NotificationVault.sol", "src/usd3/USD3.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

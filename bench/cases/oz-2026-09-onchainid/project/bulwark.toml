@@ -1,0 +1,72 @@
+# Bench case: ONCHAINID (T-REX Network) Audit (OpenZeppelin (private engagement)), findings published 2026-09-29.
+
+[target]
+repo = "https://github.com/T-REX-Network/ONCHAINID.git"
+branch = "main"
+commit = "d2096509e3bed2589fff36f6f673498f47e23d73"
+scope = ["."]
+core_contracts = ["KeyManager", "SmartAccount", "Errors", "FormatResolver", "Hashing", "KeyPurposes", "KeyTypes", "EASClaimIssuer", "KeyApprovalModule", "RecoveryModule", "ERC734Validator", "ERC7579Validator", "ReputationRegistry", "Structs"]
+
+[workspace]
+path = "audit-workspace"
+
+[passes.recon]
+enabled = true
+scv_scan = true
+
+[passes.agents]
+enabled = true
+agents = ["red", "blue", "gold"]
+variant_analysis = true
+
+[[passes.agents.components]]
+name = "contracts"
+files = ["contracts/KeyManager.sol", "contracts/SmartAccount.sol"]
+
+[[passes.agents.components]]
+name = "libraries"
+files = ["contracts/libraries/Errors.sol", "contracts/libraries/FormatResolver.sol", "contracts/libraries/Hashing.sol", "contracts/libraries/KeyPurposes.sol", "contracts/libraries/KeyTypes.sol"]
+
+[[passes.agents.components]]
+name = "claims"
+files = ["contracts/modules/claims/EASClaimIssuer.sol"]
+
+[[passes.agents.components]]
+name = "executors"
+files = ["contracts/modules/executors/KeyApprovalModule.sol", "contracts/modules/executors/RecoveryModule.sol"]
+
+[[passes.agents.components]]
+name = "validators"
+files = ["contracts/modules/validators/ERC734Validator.sol", "contracts/modules/validators/ERC7579Validator.sol"]
+
+[[passes.agents.components]]
+name = "reputation"
+files = ["contracts/reputation/ReputationRegistry.sol"]
+
+[[passes.agents.components]]
+name = "storage"
+files = ["contracts/storage/Structs.sol"]
+
+[passes.poc]
+enabled = true
+max_retries = 2
+fp_check = true
+
+[passes.fuzzing]
+enabled = true
+fuzz_runs = 10_000
+invariant_depth = 50
+
+[passes.formal]
+enabled = true
+solver_timeout = 300
+loop_bound = 5
+
+[passes.review]
+enabled = true
+
+[prompts]
+dir = "prompts"
+
+[schemas]
+dir = "schemas"

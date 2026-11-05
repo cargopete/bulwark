@@ -1,0 +1,129 @@
+{
+  "case": "nethermind-2026-09-vana-staking",
+  "source": "https://github.com/NethermindEth/PublicAuditReports/blob/main/NM0451-1052-FINAL_Vana_Staking.pdf",
+  "findings": [
+    {
+      "id": "6.1",
+      "severity": "Critical",
+      "title": "A rigged STREAM entity can drain other entities' principal from the shared VanaPoolTreasury",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolStaking/VanaPoolStakingImplementation.sol",
+        "contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol"
+      ],
+      "functions": [
+        "stake",
+        "vanaToEntityShare",
+        "registerEntityStake",
+        "distributeRewards",
+        "_unstake"
+      ],
+      "root_cause": "Shares are minted via a truncated rate (totalShares*1e18/activeRewardPool) that an owner can steer, while a bonded position's cost basis is booked at raw msg.value; an early exit refunds that raw cost basis from the shared treasury but debits the entity only the smaller share value, so other entities' principal is drained."
+    },
+    {
+      "id": "6.2",
+      "severity": "High",
+      "title": "A malicious entity owner can capture or withhold the rewards the splitter has already paid to their entity's stakers",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol",
+        "contracts/vanaStaking/rewardSplitter/RewardSplitterImplementation.sol"
+      ],
+      "functions": [
+        "addRewards",
+        "distributeRewards",
+        "processRewards"
+      ],
+      "root_cause": "Splitter payouts only credit the STREAM entity's locked pool and reach stakers only when the owner installs a vesting schedule, at which point commission (up to 100%) is taken at the then-current rate, so the owner can withhold or capture rewards stakers already earned."
+    },
+    {
+      "id": "6.3",
+      "severity": "Medium",
+      "title": "A large matured position nullifies the bonding period for subsequent deposits",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolStaking/VanaPoolStakingImplementation.sol"
+      ],
+      "functions": [
+        "stake"
+      ],
+      "root_cause": "The new eligibility timestamp is currentTimestamp + stakeAmount*bondingPeriod/newTotalValue, so a large existing matured position shrinks the bond applied to new capital to almost nothing."
+    },
+    {
+      "id": "6.4",
+      "severity": "Medium",
+      "title": "Accrued commission can never be withdrawn from the treasury",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol",
+        "contracts/vanaStaking/vanaPoolTreasury/VanaPoolTreasuryImplementation.sol"
+      ],
+      "functions": [
+        "claimCommission",
+        "transferVana"
+      ],
+      "root_cause": "claimCommission has VanaPoolEntity call the treasury's transferVana, which requires DEFAULT_ADMIN_ROLE that the entity contract does not hold, so commission withdrawals always revert."
+    },
+    {
+      "id": "6.5",
+      "severity": "Medium",
+      "title": "Redelegating into a matured position makes already earned rewards forfeitable",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolStaking/VanaPoolStakingImplementation.sol"
+      ],
+      "functions": [
+        "redelegate",
+        "stake"
+      ],
+      "root_cause": "stake() banks a matured position's gain into vestedRewards and resets the cost basis before re-bonding, but redelegate into a matured position skips that step, so already-earned rewards become forfeitable again."
+    },
+    {
+      "id": "6.6",
+      "severity": "Medium",
+      "title": "Reward distribution weight can be increased by settling rewards early",
+      "contracts": [
+        "contracts/vanaStaking/rewardSplitter/RewardSplitterImplementation.sol",
+        "contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol"
+      ],
+      "functions": [
+        "distribute",
+        "processRewards"
+      ],
+      "root_cause": "The splitter weights entities by stake-seconds of activeRewardPool, and the permissionless processRewards moves value from the locked to the active pool, so anyone can inflate an entity's weight by settling early."
+    },
+    {
+      "id": "6.7",
+      "severity": "Medium",
+      "title": "Rounding dust left by the final unstake disables an entity",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolEntity/VanaPoolEntityImplementation.sol"
+      ],
+      "functions": [
+        "entityShareToVana",
+        "vanaToEntityShare"
+      ],
+      "root_cause": "entityShareToVana guards the empty case on share supply but vanaToEntityShare guards on pool size, so floor-division dust left after the last holder exits makes the share rate 0 and new deposits mint nothing."
+    },
+    {
+      "id": "6.8",
+      "severity": "Medium",
+      "title": "The executeBuyAndBurn(...) function sends tokens to a configurable sink address instead of destroying them",
+      "contracts": [
+        "contracts/vanaStaking/rewardSplitter/RewardSplitterImplementation.sol"
+      ],
+      "functions": [
+        "executeBuyAndBurn"
+      ],
+      "root_cause": "The burn transfers pendingBurn to a configurable sink address rather than destroying it, so totalSupply never falls and the buy-and-burn feature does not work."
+    },
+    {
+      "id": "6.9",
+      "severity": "Medium",
+      "title": "The entity registration stake never serves a bonding period",
+      "contracts": [
+        "contracts/vanaStaking/vanaPoolStaking/VanaPoolStakingImplementation.sol"
+      ],
+      "functions": [
+        "registerEntityStake"
+      ],
+      "root_cause": "registerEntityStake writes shares and cost basis but never sets rewardEligibilityTimestamp, so the owner's registration stake is unbonded from creation."
+    }
+  ],
+  "others": []
+}
