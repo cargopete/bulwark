@@ -77,7 +77,7 @@ Read these files in order:
 1. `AUDIT_CONTEXT.md` — economic parameters (fee rates, pool mechanics, token amounts)
 2. `PROPERTIES.md` — economic invariants you must verify
 3. `KNOWN_ISSUES.md` — accepted risks and known findings
-4. `ATTACK_PATTERNS.md` — AP-1 (rounding exploitation), AP-10 (first-depositor), AP-11 (balance-delta)
+4. `ATTACK_PATTERNS.md`, if present — patterns from earlier audits of this protocol
 5. `audit-workspace/recon/math-operations.json` — every arithmetic operation inventoried
 6. `audit-workspace/recon/entry-points.json` — state-changing functions
 7. `audit-workspace/recon/slither-results.json` — check for divide-before-multiply findings

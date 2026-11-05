@@ -183,6 +183,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let m = run_medusa(
             ctx,
             &build_dir,
+            &forge_test_dir,
             &corpus,
             &results_dir,
             workers,
@@ -192,6 +193,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         let e = run_echidna(
             ctx,
             &build_dir,
+            &forge_test_dir,
             &corpus,
             &results_dir,
             workers,
@@ -280,12 +282,33 @@ fn find_contract(dir: &Path, name: &str) -> bool {
         .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(&needle)))
 }
 
-/// Run a fuzzer under a hard wall-clock cap a little past its own timeout.
-async fn run_capped(bin: &Path, args: &[&str], dir: &Path, timeout_s: u64, log: &Path) -> String {
-    let cap = (timeout_s + 300).to_string();
-    let mut full = vec![cap.as_str(), bin.to_str().unwrap_or_default()];
+/// Run a fuzzer under a wall-clock cap that leaves room for its compile, which on a large
+/// project can take a quarter of an hour before the fuzzer's own timeout starts. The cap sends
+/// SIGINT so the fuzzer still prints its summary. Forge is pointed at the generated suite alone,
+/// because crytic-compile builds the whole test directory and the project's own tests can need
+/// libraries linked that Echidna will not deploy.
+async fn run_capped(
+    bin: &Path,
+    args: &[&str],
+    dir: &Path,
+    suite: &Path,
+    timeout_s: u64,
+    log: &Path,
+) -> String {
+    let cap = (timeout_s + 1800).to_string();
+    let suite_env = format!("FOUNDRY_TEST={}", suite.display());
+    let mut full = vec![
+        suite_env.as_str(),
+        "timeout",
+        "-s",
+        "INT",
+        "-k",
+        "120",
+        cap.as_str(),
+        bin.to_str().unwrap_or_default(),
+    ];
     full.extend_from_slice(args);
-    let combined = match crate::tools::run_command("timeout", &full, dir).await {
+    let combined = match crate::tools::run_command("env", &full, dir).await {
         Ok(o) => format!(
             "{}\n{}",
             String::from_utf8_lossy(&o.stdout),
@@ -308,6 +331,7 @@ fn no_tests(mut r: ToolRun, log: &Path) -> ToolRun {
 async fn run_medusa(
     ctx: &PipelineContext,
     build_dir: &Path,
+    suite: &Path,
     corpus: &Path,
     results: &Path,
     workers: usize,
@@ -335,6 +359,7 @@ async fn run_medusa(
         &bin,
         &["fuzz", "--config", &cfg_path],
         build_dir,
+        suite,
         timeout_s,
         &log,
     )
@@ -345,6 +370,7 @@ async fn run_medusa(
 async fn run_echidna(
     ctx: &PipelineContext,
     build_dir: &Path,
+    suite: &Path,
     corpus: &Path,
     results: &Path,
     workers: usize,
@@ -376,6 +402,7 @@ async fn run_echidna(
         &bin,
         &[".", "--contract", TESTER, "--config", &cfg_path],
         build_dir,
+        suite,
         timeout_s,
         &log,
     )

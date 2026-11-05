@@ -60,7 +60,7 @@ Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
 2. `PROPERTIES.md` — all properties you must verify (your primary input)
 3. `KNOWN_ISSUES.md` — accepted risks and known findings + focus areas
-4. `ATTACK_PATTERNS.md` — known vulnerability patterns
+4. `ATTACK_PATTERNS.md`, if present — patterns from earlier audits of this protocol
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/storage-layouts.json` — storage slot assignments
 7. `audit-workspace/recon/dependency-graph.json` — inheritance and call relationships

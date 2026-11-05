@@ -39,7 +39,7 @@ Core attack vectors to investigate for ANY protocol (adapt to this one from AUDI
 - Delegate/deposit cycling: can rounding accumulation be profitable at scale?
 - First-depositor share inflation: deposit dust, donate large amount, drain subsequent depositors
 
-### Cross-Contract Routing Capture (AP-11)
+### Cross-Contract Routing Capture
 - Does any contract use `balanceOf(address(this))` to measure incoming tokens?
 - Are fund-routing variables (destination, recipient, beneficiary) user-settable?
 - Can a routing variable be set to `address(this)` of the paying contract, causing a self-referential loop?
@@ -87,9 +87,9 @@ ALL contracts it touches. Don't stop at the first contract boundary.
 
 Read these files in order:
 1. `AUDIT_CONTEXT.md` — protocol overview, trust model
-2. `PROPERTIES.md` — the 22 invariants (your targets to break)
+2. `PROPERTIES.md` — the invariants (your targets to break)
 3. `KNOWN_ISSUES.md` — accepted risks and known findings + focus areas
-4. `ATTACK_PATTERNS.md` — known patterns from previous audits — search for VARIANTS (especially AP-11)
+4. `ATTACK_PATTERNS.md`, if present — patterns from earlier audits of this protocol; search for VARIANTS
 5. `audit-workspace/recon/entry-points.json` — all state-changing functions
 6. `audit-workspace/recon/slither-results.json` — static analysis results
 7. `audit-workspace/recon/math-operations.json` — arithmetic operations inventory

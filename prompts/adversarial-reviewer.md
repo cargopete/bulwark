@@ -68,7 +68,7 @@ Read ALL of these files (this is the full pipeline output):
 1. `AUDIT_CONTEXT.md` — protocol overview
 2. `PROPERTIES.md` — the security properties (all P-XX entries)
 3. `KNOWN_ISSUES.md` — accepted risks
-4. `ATTACK_PATTERNS.md` — known attack patterns
+4. `ATTACK_PATTERNS.md`, if present — patterns from earlier audits of this protocol
 
 ### Pass 2: Agent Findings
 5. `audit-workspace/findings/red-agent-raw.json` — RED agent findings

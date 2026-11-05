@@ -6,7 +6,7 @@ use crate::pipeline::pass::{PassNumber, PassResult, PassStatus, PipelineContext}
 use crate::tools::claude;
 use crate::workspace::Workspace;
 use console::style;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -301,51 +301,19 @@ impl Orchestrator {
         }
     }
 
-    /// Copy context files into audit_dir so Claude agents can read them.
+    /// Copy the project's context files into audit_dir so agents can read them.
     ///
-    /// Resolution order (first match wins):
-    /// 1. Already present in audit_dir (from a previous run or manual placement)
-    /// 2. Project context dir: `bulwark_root/context/`
-    /// 3. Install context dir: `bulwark_install/context/`
-    ///
-    /// `ATTACK_PATTERNS.md` always comes from the install dir — it's accumulated generic
-    /// knowledge that shouldn't be overridden per-project.
+    /// They come from the `context/` beside the config in use. The install's copies describe
+    /// The Graph, so they are read only when no project config is mounted. On a run from Pass 1 a file the project does not supply is removed, so a
+    /// stale one from an earlier run is never read and AUDIT_CONTEXT.md and PROPERTIES.md are
+    /// derived afresh; a resumed run keeps what its Pass 1 derived.
     fn stage_context_files(&self) {
-        let project_ctx = self.ctx.bulwark_root.join("context");
-        let install_ctx = self.ctx.bulwark_install.join("context");
-
-        let files = [
-            ("AUDIT_CONTEXT.md", false),
-            ("PROPERTIES.md", false),
-            ("KNOWN_ISSUES.md", false),
-            ("ATTACK_PATTERNS.md", true), // always from install
-        ];
-
-        for (filename, install_only) in &files {
-            let dest = self.ctx.audit_dir.join(filename);
-
-            // Project context always overwrites — stale files from a previous run on a
-            // different target must not persist across runs on the same volume.
-            if !install_only {
-                let project_file = project_ctx.join(filename);
-                if project_file.exists() {
-                    if std::fs::copy(&project_file, &dest).is_ok() {
-                        debug!("staged {filename} from project context");
-                        continue;
-                    }
-                }
-            }
-
-            // Install context only fills in if the file isn't already present.
-            if !dest.exists() {
-                let install_file = install_ctx.join(filename);
-                if install_file.exists() {
-                    if std::fs::copy(&install_file, &dest).is_ok() {
-                        debug!("staged {filename} from install context");
-                    }
-                }
-            }
-        }
+        let project_ctx = if self.ctx.bulwark_root.join("bulwark.toml").exists() {
+            self.ctx.bulwark_root.join("context")
+        } else {
+            self.ctx.bulwark_install.join("context")
+        };
+        stage_context(&project_ctx, &self.ctx.audit_dir, self.start_pass <= 1);
     }
 
     fn preflight(&self) -> Result<()> {
@@ -409,5 +377,50 @@ impl Orchestrator {
             None => eprintln!("  Claude spend: ${spent:.2}, no budget set"),
         }
         eprintln!();
+    }
+}
+
+fn stage_context(context_dir: &Path, audit_dir: &Path, fresh: bool) {
+    for filename in [
+        "AUDIT_CONTEXT.md",
+        "PROPERTIES.md",
+        "KNOWN_ISSUES.md",
+        "ATTACK_PATTERNS.md",
+    ] {
+        let dest = audit_dir.join(filename);
+        let src = context_dir.join(filename);
+        if src.exists() {
+            if let Err(e) = std::fs::copy(&src, &dest) {
+                warn!("could not stage {filename}: {e}");
+            }
+        } else if fresh && dest.exists() {
+            let _ = std::fs::remove_file(&dest);
+            debug!("removed stale {filename}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_context_is_removed_only_on_a_fresh_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, audit) = (tmp.path().join("context"), tmp.path().join("audit"));
+        std::fs::create_dir_all(&ctx).unwrap();
+        std::fs::create_dir_all(&audit).unwrap();
+        std::fs::write(ctx.join("AUDIT_CONTEXT.md"), "target").unwrap();
+        std::fs::write(audit.join("PROPERTIES.md"), "derived").unwrap();
+
+        stage_context(&ctx, &audit, false);
+        assert!(audit.join("PROPERTIES.md").exists());
+
+        stage_context(&ctx, &audit, true);
+        assert!(!audit.join("PROPERTIES.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(audit.join("AUDIT_CONTEXT.md")).unwrap(),
+            "target"
+        );
     }
 }

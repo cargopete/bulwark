@@ -61,3 +61,5 @@ is why a pass that runs nothing now fails the run.
 | Agents read a previous run's findings | Ondo | #39: Pass 2 moves the previous output outside the audit directory |
 | An hour of agent work on code the proxy no longer routes to | SSV | #40: deployed-source check in Pass 1 |
 | Medusa built nothing (compile target relative to its config); Medusa and Echidna raced on `forge clean` | Ondo dev run | absolute target; the fuzzers run one after the other |
+| Every target without its own PROPERTIES.md got The Graph's, and every target The Graph's attack patterns, from the pipeline's staging after the entrypoint was fixed | Alchemix, all nine bench cases | #52: context only from the target's own `context/` |
+| Medusa killed by the wall-clock cap mid-campaign and reported as having run nothing; Echidna refused the project's own tests for unlinked libraries | Alchemix | #52: the cap allows for the compile and sends SIGINT; the fuzzers compile the suite alone |
