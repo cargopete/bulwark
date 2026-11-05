@@ -3,6 +3,7 @@ use crate::pipeline::pass::PipelineContext;
 use crate::tools::claude::ClaudeSession;
 use console::style;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Pass 5: Formal Verification via Halmos bounded model checking.
@@ -50,7 +51,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
     let _ = std::fs::remove_dir_all(&real_dir);
     let _ = std::fs::remove_dir_all(formal_dir.join("real-unbuilt"));
     let tests_generated =
-        generate_symbolic_tests(ctx, &formal_dir, &real_dir, &properties, &logs_dir).await;
+        generate_symbolic_tests(ctx, &formal_dir, &real_dir, &properties, &logs_dir, None).await;
     if tests_generated > 0 {
         eprintln!(
             "  {} Generated {tests_generated} symbolic test files",
@@ -109,32 +110,6 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         }
     }
 
-    let mut real_tests = discover_checks(&real_dir);
-    let mut real_build_failed = false;
-    if !real_tests.is_empty() {
-        eprintln!("  Compiling real-contract tests in the project...");
-        let out = crate::tools::run_command(forge, &["build"], &build_dir).await?;
-        if out.status.success() {
-            eprintln!("  {} Real-contract tests compile", style("✓").green());
-        } else {
-            // Left in place they would break every later forge build in the project.
-            eprintln!(
-                "  {} Real-contract tests do not compile; moved to audit-workspace/formal/real-unbuilt/",
-                style("⚠").yellow()
-            );
-            let _ = std::fs::write(logs_dir.join("real-build.log"), &out.stderr);
-            let parked = formal_dir.join("real-unbuilt");
-            let _ = std::fs::remove_dir_all(&parked);
-            let _ = std::fs::rename(&real_dir, &parked);
-            real_tests.clear();
-            real_build_failed = true;
-        }
-    }
-
-    // ── Step 3: Run Halmos on each property, real layer first ───────
-    let mut verification: serde_json::Map<String, Value> = serde_json::Map::new();
-    let mut formal_findings: Vec<Value> = Vec::new();
-    let model_out = read_foundry_out_dir(&formal_dir);
     let halmos_bin = if halmos_available {
         Some(ctx.config.resolve_tool("halmos")?)
     } else {
@@ -144,11 +119,102 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         solver_timeout,
         loop_bound,
     };
-
     eprintln!("  Running Halmos (solver-timeout={solver_timeout}s, loop={loop_bound})...\n");
+
+    // ── Step 3a: real layer, with one repair round ──────────────────
+    let mut real_build_failed = false;
+    let mut real_runs: BTreeMap<String, Vec<(String, HalmosRun)>> = BTreeMap::new();
+    if let Some(halmos) = halmos_bin.as_deref() {
+        let mut real_tests = discover_checks(&real_dir);
+        let mut build_log = compile_real(forge, &build_dir, &real_tests).await?;
+        if build_log.is_none() {
+            real_runs = run_real_layer(
+                halmos,
+                &build_dir,
+                &formal_dir,
+                &properties,
+                &real_tests,
+                &settings,
+            )
+            .await?;
+        }
+
+        let broken: Vec<&HalmosRun> = real_runs
+            .values()
+            .flatten()
+            .map(|(_, r)| r)
+            .filter(|r| did_not_run(r.status))
+            .collect();
+        if build_log.is_some() || !broken.is_empty() {
+            let evidence = match &build_log {
+                Some(log) => format!("`forge build` failed:\n```\n{}\n```\n", tail(log, 60)),
+                None => broken
+                    .iter()
+                    .map(|r| {
+                        let log = std::fs::read_to_string(&r.log).unwrap_or_default();
+                        format!(
+                            "{} ({}):\n```\n{}\n```\n",
+                            r.log.display(),
+                            r.status,
+                            halmos_errors(&log)
+                        )
+                    })
+                    .collect(),
+            };
+            eprintln!(
+                "  {} Real-contract tests did not run; one repair round",
+                style("⚠").yellow()
+            );
+            let feedback = format!(
+                "\n\n## REPAIR: the real-contract tests did not run\n\n\
+                 Fix the files in the real-contract directory in place, then check each one with \
+                 `halmos --contract <C> --function <prefix>` before you finish. Do not touch the \
+                 model directory.\n\n{evidence}"
+            );
+            generate_symbolic_tests(
+                ctx,
+                &formal_dir,
+                &real_dir,
+                &properties,
+                &logs_dir,
+                Some(&feedback),
+            )
+            .await;
+            patch_bare_check_names(&real_dir);
+            real_tests = discover_checks(&real_dir);
+            build_log = compile_real(forge, &build_dir, &real_tests).await?;
+            if build_log.is_none() {
+                real_runs = run_real_layer(
+                    halmos,
+                    &build_dir,
+                    &formal_dir,
+                    &properties,
+                    &real_tests,
+                    &settings,
+                )
+                .await?;
+            }
+        }
+        if let Some(log) = build_log {
+            // Left in place they would break every later forge build in the project.
+            eprintln!(
+                "  {} Real-contract tests do not compile; moved to audit-workspace/formal/real-unbuilt/",
+                style("⚠").yellow()
+            );
+            let _ = std::fs::write(logs_dir.join("real-build.log"), &log);
+            let parked = formal_dir.join("real-unbuilt");
+            let _ = std::fs::remove_dir_all(&parked);
+            let _ = std::fs::rename(&real_dir, &parked);
+            real_build_failed = !real_tests.is_empty();
+        }
+    }
+
+    // ── Step 3b: model layer, and the per-property record ───────────
+    let mut verification: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut formal_findings: Vec<Value> = Vec::new();
+    let model_out = read_foundry_out_dir(&formal_dir);
     for prop in &properties {
         let prefix = check_prefix(prop);
-        let real_contracts = contracts_with(&real_tests, &prefix);
         let has_model = !contracts_with(&model_tests, &prefix).is_empty();
         let mut entry = serde_json::Map::new();
 
@@ -159,26 +225,20 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             continue;
         };
 
-        let mut real_results = Vec::new();
-        for contract in &real_contracts {
-            let r = run_halmos(
-                halmos,
-                &build_dir,
-                Some(contract),
-                &prefix,
-                None,
-                &settings,
-                &formal_dir.join(format!("halmos-real-{prop}-{contract}.log")),
-            )
-            .await?;
-            report_line(prop, Layer::Real, Some(contract), &r);
-            if r.status == "VIOLATED" {
-                formal_findings.push(real_finding(prop, contract, &prefix, &r));
-            }
-            real_results.push(r.to_json(Some(contract)));
-        }
-        if !real_results.is_empty() {
-            entry.insert(Layer::Real.key().into(), Value::Array(real_results));
+        let real: Vec<Value> = real_runs
+            .get(prop)
+            .into_iter()
+            .flatten()
+            .map(|(contract, r)| {
+                report_line(prop, Layer::Real, Some(contract), r);
+                if r.status == "VIOLATED" {
+                    formal_findings.push(real_finding(prop, contract, &prefix, r));
+                }
+                r.to_json(Some(contract))
+            })
+            .collect();
+        if !real.is_empty() {
+            entry.insert(Layer::Real.key().into(), Value::Array(real));
         } else if real_build_failed {
             entry.insert(Layer::Real.key().into(), json!([{"status": "build_error"}]));
         }
@@ -293,21 +353,21 @@ async fn run_halmos(
     s: &HalmosSettings,
     log: &Path,
 ) -> Result<HalmosRun> {
-    let total = (s.solver_timeout + 60).to_string();
-    let solver = s.solver_timeout.to_string();
+    // A property's checks share one Halmos run, and each may spend the full solver timeout.
+    let total = (s.solver_timeout * 3 + 60).to_string();
+    let solver = solver_timeout_arg(s.solver_timeout);
     let loop_bound = s.loop_bound.to_string();
     let mut args: Vec<&str> = vec![&total, halmos.to_str().unwrap_or("halmos")];
     if let Some(c) = contract {
         args.extend(["--contract", c]);
     }
+    // Branching keeps Halmos's 1ms default: a slow branch query is pruned, not waited on.
     args.extend([
         "--function",
         prefix,
         "--loop",
         &loop_bound,
         "--solver-timeout-assertion",
-        &solver,
-        "--solver-timeout-branching",
         &solver,
     ]);
     if let Some(out) = forge_out {
@@ -351,6 +411,8 @@ fn classify(combined: &str, code: Option<i32>, duration: u64) -> &'static str {
     let ran = combined.contains("[PASS]") || combined.contains("[FAIL]");
     if real_counterexample {
         "VIOLATED"
+    } else if combined.contains("setUp() failed") {
+        "setup_failed"
     } else if killed_by_timeout(code)
         || combined.contains("[TIMEOUT]")
         || lower.contains("counterexample: unknown")
@@ -423,7 +485,7 @@ fn rank(status: &str) -> u8 {
     match status {
         "VIOLATED" => 0,
         "TIMEOUT" => 1,
-        "ERROR" | "build_error" => 2,
+        "ERROR" | "build_error" | "setup_failed" => 2,
         "UNKNOWN" | "VACUOUS" => 3,
         "VERIFIED" => 4,
         _ => 5,
@@ -466,7 +528,7 @@ fn summarise(verification: &serde_json::Map<String, Value>) -> Value {
         "timeout": keys(&|v: &Value| v["status"] == "TIMEOUT"),
         "not_run": keys(&|v: &Value| matches!(
             v["status"].as_str(),
-            Some("not_run" | "no_test" | "build_error")
+            Some("not_run" | "no_test" | "build_error" | "setup_failed")
         )),
     })
 }
@@ -577,6 +639,7 @@ async fn generate_symbolic_tests(
     real_dir: &Path,
     properties: &[String],
     logs_dir: &Path,
+    repair: Option<&str>,
 ) -> usize {
     let _ = std::fs::create_dir_all(real_dir);
     let prompt_path = ctx.resolve_prompt_path("halmos-generator.md");
@@ -646,10 +709,18 @@ async fn generate_symbolic_tests(
 
     let session = ClaudeSession {
         claude_bin,
-        prompt: format!("{prompt}{}", ctx.persona_section("formal")),
+        prompt: format!(
+            "{prompt}{}{}",
+            repair.unwrap_or_default(),
+            ctx.persona_section("formal")
+        ),
         max_turns: ctx.config.passes.formal.max_turns,
         working_dir: ctx.audit_dir.clone(),
-        log_file: logs_dir.join("halmos-generation.log"),
+        log_file: logs_dir.join(if repair.is_some() {
+            "halmos-repair.log"
+        } else {
+            "halmos-generation.log"
+        }),
         model: Some(ctx.config.model_for("formal")),
         allowed_tools: vec![
             "Read".into(),
@@ -759,6 +830,86 @@ fn suffix_bare_checks(src: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Statuses that mean the check never explored the property.
+fn did_not_run(status: &str) -> bool {
+    matches!(status, "setup_failed" | "build_error" | "ERROR" | "VACUOUS")
+}
+
+/// `forge build` in the project; `Some(log)` when it fails.
+async fn compile_real(
+    forge: &str,
+    build_dir: &Path,
+    tests: &[(String, String)],
+) -> Result<Option<String>> {
+    if tests.is_empty() {
+        return Ok(None);
+    }
+    eprintln!("  Compiling real-contract tests in the project...");
+    let out = crate::tools::run_command(forge, &["build"], build_dir).await?;
+    if out.status.success() {
+        eprintln!("  {} Real-contract tests compile", style("✓").green());
+        Ok(None)
+    } else {
+        Ok(Some(format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )))
+    }
+}
+
+async fn run_real_layer(
+    halmos: &Path,
+    build_dir: &Path,
+    formal_dir: &Path,
+    properties: &[String],
+    tests: &[(String, String)],
+    s: &HalmosSettings,
+) -> Result<BTreeMap<String, Vec<(String, HalmosRun)>>> {
+    let mut runs = BTreeMap::new();
+    for prop in properties {
+        let prefix = check_prefix(prop);
+        let mut results = Vec::new();
+        for contract in contracts_with(tests, &prefix) {
+            let log = formal_dir.join(format!("halmos-real-{prop}-{contract}.log"));
+            let r = run_halmos(halmos, build_dir, Some(&contract), &prefix, None, s, &log).await?;
+            results.push((contract, r));
+        }
+        if !results.is_empty() {
+            runs.insert(prop.clone(), results);
+        }
+    }
+    Ok(runs)
+}
+
+/// The lines of a Halmos log that say why a check did not run, without the lint noise.
+fn halmos_errors(log: &str) -> String {
+    let lines: Vec<&str> = log
+        .lines()
+        .filter(|l| {
+            let t = l.to_lowercase();
+            t.contains("error")
+                || t.contains("unsupported")
+                || t.contains("failed")
+                || t.contains("warning  in")
+                || l.contains("Running ")
+        })
+        .filter(|l| !l.starts_with("warning["))
+        .take(25)
+        .collect();
+    lines.join("\n")
+}
+
+fn tail(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Halmos 0.3 reads a bare number as milliseconds, so `300` gave the solver 0.3s.
+fn solver_timeout_arg(secs: u64) -> String {
+    format!("{secs}s")
 }
 
 /// `timeout` exits 124 when it kills the command; 137 if it had to SIGKILL.
@@ -985,5 +1136,29 @@ mod tests {
             "build_error"
         );
         assert_eq!(classify("no tests matched", Some(0), 1), "VACUOUS");
+        let setup = "Running 3 tests for test/bulwark-formal/X.t.sol:X\n\
+                     ERROR    setUp() failed: HalmosException: No successful path found in setUp()\n\
+                     Symbolic test result: 0 passed; 3 failed; time: 0.02s";
+        assert_eq!(classify(setup, Some(1), 3), "setup_failed");
+        assert!(did_not_run("setup_failed") && !did_not_run("TIMEOUT"));
+    }
+
+    #[test]
+    fn solver_timeout_is_passed_in_seconds() {
+        assert_eq!(solver_timeout_arg(300), "300s");
+    }
+
+    #[test]
+    fn repair_evidence_keeps_the_cause_and_drops_lint() {
+        let log = "No files changed, compilation skipped\n\
+                   Running 3 tests for test/bulwark-formal/F.t.sol:F\n\
+                   ↩ CALL 0x (error: HalmosException('Unsupported cheat code: deployCode(string,bytes)'))\n\
+                   warning[reentrancy-no-eth]: external call can be reentered\n\
+                   ERROR    setUp() failed: HalmosException: No successful path found in setUp()\n";
+        let e = halmos_errors(log);
+        assert!(
+            e.contains("deployCode") && e.contains("setUp() failed") && e.contains("Running 3")
+        );
+        assert!(!e.contains("reentrancy"));
     }
 }

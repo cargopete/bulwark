@@ -72,7 +72,11 @@ Rules for this layer:
    `makeAddr`.
 6. Cheatcodes Halmos supports here: `vm.prank`, `vm.startPrank`, `vm.stopPrank`, `vm.deal`,
    `vm.warp`, `vm.roll`, `vm.store`, `vm.load`, `vm.assume`, `vm.etch`. Assertions:
-   `assert`, `assertEq`, `assertLe`, `assertGe`, `assertTrue`.
+   `assert`, `assertEq`, `assertLe`, `assertGe`, `assertTrue`. It does **not** support
+   `deployCode`, `vm.getCode`, `vm.expectRevert`, `vm.ffi` or the `vm.env*` family, and one of
+   them anywhere in `setUp()` fails every check. Deploy with `new`. If a shared test base (for
+   example the fuzzing pass's files in the test directory) deploys with `deployCode`, write your
+   own `setUp()` rather than inheriting it.
 7. **Check it runs before you finish.** From the build directory named below, run `forge build`,
    then run each check once with a short bound:
    `halmos --contract SymbolicVault --function check_PV3_ --loop 2 --solver-timeout-assertion 60`.
