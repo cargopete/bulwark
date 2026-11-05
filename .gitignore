@@ -13,3 +13,4 @@ poc/
 # Added by cargo
 
 /target
+bench/runs/

@@ -2,6 +2,7 @@
 // Suppress collapsible_if: clippy suggests `let` chains which are unstable (rust#53667)
 #![allow(clippy::collapsible_if)]
 
+mod bench;
 mod budget;
 mod cli;
 mod config;
@@ -47,6 +48,9 @@ async fn main() -> anyhow::Result<()> {
     // init creates bulwark.toml, so it cannot wait for one to load.
     if let Commands::Init(args) = cli.command {
         return cmd_init(args);
+    }
+    if let Commands::Bench(cmd) = cli.command {
+        return cmd_bench(cmd).await;
     }
     if let Commands::Dashboard(args) = &cli.command {
         if let Some(root) = &args.workspace {
@@ -120,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Findings(args) => cmd_findings(config, audit_dir, args)?,
         Commands::Validate(args) => cmd_validate(config, audit_dir, bulwark_root, args)?,
         Commands::Report(args) => cmd_report(config, audit_dir, args)?,
-        Commands::Init(_) => unreachable!("handled before the config loads"),
+        Commands::Init(_) | Commands::Bench(_) => unreachable!("handled before the config loads"),
         Commands::Dashboard(args) => {
             let ws = Workspace::new(&audit_dir, &config.workspace.path);
             let mut scope = dashboard::status::Scope::from_config(&config);
@@ -721,4 +725,54 @@ fn cmd_login() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn cmd_bench(cmd: cli::BenchCmd) -> anyhow::Result<()> {
+    match cmd {
+        cli::BenchCmd::Score {
+            expected,
+            workspace,
+            out,
+            label,
+            model,
+        } => {
+            let claude = which_claude();
+            let r = bench::score(bench::ScoreArgs {
+                expected: &expected,
+                workspace: &workspace,
+                out_dir: &out,
+                label: &label,
+                claude: &claude,
+                model: &model,
+            })
+            .await?;
+            println!("{}\n{}", bench::TABLE_HEADER, bench::table_row(&r));
+        }
+        cli::BenchCmd::Table { results } => {
+            let mut rows: Vec<serde_json::Value> = std::fs::read_dir(&results)?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "json"))
+                .filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
+                .collect();
+            rows.sort_by(|a, b| b["scored_at"].as_str().cmp(&a["scored_at"].as_str()));
+            println!("{}", bench::TABLE_HEADER);
+            for r in &rows {
+                println!("{}", bench::table_row(r));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn which_claude() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("{home}/.local/bin/claude"),
+        "/usr/local/bin/claude".into(),
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
+    .unwrap_or_else(|| PathBuf::from("claude"))
 }

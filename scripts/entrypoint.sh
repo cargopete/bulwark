@@ -78,27 +78,46 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
 fi
 
 # ── Clone or update target repo ─────────────────────────────────────
-if [ ! -d "$AUDIT_DIR/.git" ]; then
+# A bench run must be blind: a fresh clone every time, since the snapshot below drops the remote.
+if [ "${BULWARK_BENCH:-}" = "1" ] && [ -d "$AUDIT_DIR/.git" ] && [ ! -d "$AUDIT_DIR/audit-workspace" ]; then
+    rm -rf "$AUDIT_DIR"
+fi
+if [ "${BULWARK_BENCH:-}" = "1" ] && [ -d "$AUDIT_DIR/.git" ]; then
+    echo "→ Bench snapshot already in place (resuming)"
+elif [ ! -d "$AUDIT_DIR/.git" ]; then
     echo "→ Cloning $AUDIT_TARGET ($AUDIT_BRANCH)..."
     git clone --branch "$AUDIT_BRANCH" --depth 50 "$AUDIT_TARGET" "$AUDIT_DIR"
 else
     echo "→ Updating existing clone..."
     cd "$AUDIT_DIR" && git fetch origin && git reset --hard "origin/$AUDIT_BRANCH"
     # Clean bulwark-generated test artefacts so stale PoCs don't interfere with a fresh run
-    git clean -fd -- "**/test/pocs/" "**/test/bulwark/" "**/test/formal/" 2>/dev/null || true
+    git clean -fd -- "**/pocs/*.t.sol" "**/bulwark/*.sol" "**/test/formal/" 2>/dev/null || true
 fi
 
 cd "$AUDIT_DIR"
 
-if [ -n "${AUDIT_COMMIT:-}" ]; then
+if [ -n "${AUDIT_COMMIT:-}" ] && ! git cat-file -e "refs/heads/bench-snapshot" 2>/dev/null; then
     # A pin may sit deeper than the shallow clone reaches.
     git cat-file -e "${AUDIT_COMMIT}^{commit}" 2>/dev/null || git fetch --unshallow origin 2>/dev/null || git fetch origin
     git -c advice.detachedHead=false checkout --force "$AUDIT_COMMIT"
 fi
 
-if [ -f ".gitmodules" ]; then
+if [ -f ".gitmodules" ] && ! git cat-file -e "refs/heads/bench-snapshot" 2>/dev/null; then
     echo "→ Initialising submodules..."
     git submodule update --init --recursive
+fi
+
+# Later commits on a contest repo can carry the fixes. Keep only the audited tree.
+if [ "${BULWARK_BENCH:-}" = "1" ] && ! git cat-file -e "refs/heads/bench-snapshot" 2>/dev/null; then
+    echo "→ Bench: collapsing history to a single snapshot commit"
+    git checkout -q --orphan bench-snapshot
+    git add -A
+    git -c user.name=bench -c user.email=bench@localhost commit -qm snapshot --no-verify
+    git for-each-ref --format='%(refname)' | grep -v '^refs/heads/bench-snapshot$' \
+        | xargs -r -n1 git update-ref -d
+    git remote | xargs -r -n1 git remote remove
+    git reflog expire --expire=now --all
+    git gc -q --prune=now
 fi
 
 # ── Install dependencies ────────────────────────────────────────────
@@ -203,6 +222,20 @@ fi
 
 # ── Restore Claude Code settings ────────────────────────────────────
 cp /home/auditor/.bulwark-settings.json /home/auditor/.claude/settings.json 2>/dev/null || true
+if [ "${BULWARK_BENCH:-}" = "1" ]; then
+    # The contest's findings are public; an agent that can search the web can look them up.
+    python3 - <<'PY'
+import json
+p = "/home/auditor/.claude/settings.json"
+s = json.load(open(p))
+s.setdefault("permissions", {}).setdefault("deny", []).extend([
+    "WebFetch", "WebSearch",
+    "Bash(curl *)", "Bash(wget *)", "Bash(gh *)", "Bash(git clone *)", "Bash(git fetch *)",
+])
+json.dump(s, open(p, "w"), indent=2)
+PY
+    echo "→ Bench: web and network commands denied"
+fi
 
 # ── Print status (interactive mode only) ─────────────────────────────
 cd "$AUDIT_DIR"

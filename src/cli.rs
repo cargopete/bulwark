@@ -50,6 +50,10 @@ pub enum Commands {
     #[command(subcommand)]
     Program(ProgramCmd),
 
+    /// Recall benchmark against contests with judged findings
+    #[command(subcommand)]
+    Bench(BenchCmd),
+
     /// Serve a live web view of the run's health
     Dashboard(DashboardArgs),
 }
@@ -222,4 +226,28 @@ mod tests {
         assert!(parse_pass_range("1-7").is_err());
         assert!(parse_pass_range("0-3").is_err());
     }
+}
+
+#[derive(clap::Subcommand)]
+pub enum BenchCmd {
+    /// Score a finished run's workspace against a case's expected.json
+    Score {
+        #[arg(long)]
+        expected: PathBuf,
+        #[arg(long)]
+        workspace: PathBuf,
+        /// Directory for the result JSON and the judge's raw reply
+        #[arg(long, default_value = "bench/results")]
+        out: PathBuf,
+        /// Names this run in the results table, e.g. the bulwark commit
+        #[arg(long)]
+        label: String,
+        #[arg(long, default_value = "claude-opus-5-5")]
+        model: String,
+    },
+    /// Rebuild the results table from every scored run in a directory
+    Table {
+        #[arg(long, default_value = "bench/results")]
+        results: PathBuf,
+    },
 }
