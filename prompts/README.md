@@ -1,44 +1,38 @@
-# Agent Prompts
+# Prompts
 
-Persona-specific prompts for each pipeline pass that uses Claude Code.
+Each Claude Code session the pipeline starts is built from one of these files, plus the context
+the pipeline appends (scope, test infrastructure, impact table, output paths) and an optional
+persona. A project can override any file by placing its own copy under `<project>/prompts/`.
 
-## Pass 2 Agents
+| File | Pass | Session |
+|---|---|---|
+| `context-generator.md` | 1 | Writes AUDIT_CONTEXT.md and PROPERTIES.md when the target has none |
+| `red-agent.md` | 2 | Attacker: exploits that take funds |
+| `blue-agent.md` | 2 | Verifier: VERIFIED, VIOLATED or UNCERTAIN for every property in PROPERTIES.md |
+| `gold-agent.md` | 2 | Economist: rounding, accumulation, MEV, with numbers |
+| `hunter-agent.md` | 2 | One per `[[passes.agents.components]]` entry, scoped to its files |
+| `poc-generator.md` | 3 | Fork-native Foundry PoC for one finding, logging measured impact |
+| `invariant-generator.md` | 4 | One suite for Forge, Medusa and Echidna |
+| `halmos-generator.md` | 5 | Real-contract checks and import-free models, keyed by property ID |
+| `adversarial-reviewer.md` | 6 | Challenges severity, reinstates discards, finds compound attacks and blind spots |
 
-- `red-agent.md` — Attacker persona. Finds exploits that steal funds. Paid per critical finding.
-- `blue-agent.md` — Systematic verifier. Checks all 22 properties: VERIFIED / VIOLATED / UNCERTAIN.
-- `gold-agent.md` — DeFi economist. Rounding, accumulation, MEV. Every finding needs numbers.
+Agents return findings as JSON in the shape of `schemas/finding.schema.json`, including
+`impact` (an `I-<n>` row from the programme), `asset`, and `recommendation`. Scratch tests go
+under the project's test directory; the pipeline rewrites `test/scratch/` in these prompts to
+the real path.
 
-## Anti-Deference Mechanisms
+## What the prompts hold agents to
 
-All three prompts include:
-1. **Persona framing** — paid per finding at the stated severity
-2. **Severity calibration** — concrete GRT thresholds (not vague "could be bad")
-3. **No cross-agent visibility** — agents can't see each other's output
-4. **Burden of proof on dismissal** — "explain why it's NOT exploitable" for anything below Medium
-5. **No hedging language** — "this IS exploitable" or say nothing
+- No agent sees another's output.
+- Severity is the programme's, by impact row, never the model's own scale.
+- Dismissal carries the burden of proof: anything rated below Medium says why it is not
+  exploitable.
+- A PoC proves impact only by logging `bulwark:attacker_gain` or `bulwark:victim_loss`; a retry
+  is never asked to make a test pass.
+- Files are read with the Read tool; a shell read under `~/.claude` is refused.
 
-## Invocation
+## Personas
 
-Each prompt is fed to Claude Code in headless mode by `pipeline/pass2-agents.sh`:
-
-```bash
-claude -p "$(cat prompts/red-agent.md)" --max-turns 80
-```
-
-Agents write their findings directly to `audit-workspace/findings/<agent>-raw.json`.
-
-## Pass 3
-
-- `poc-generator.md` — Foundry PoC writer. Receives one finding, writes a compilable test. Retries on build failure with error context.
-
-## Pass 4
-
-- `invariant-generator.md` — Generates Foundry invariant tests from PROPERTIES.md. Handler contracts expose fuzzable actions, invariant functions assert one property each.
-
-## Pass 5
-
-- `halmos-generator.md` — Generates Halmos symbolic tests for bounded model checking. Targets P-10, P-15, P-19, P-1, P-16. Uses `check_` prefix, `vm.assume()` for constraints.
-
-## Pass 6
-
-- `adversarial-reviewer.md` — Last line of defence. Challenges verified properties, severity ratings, discarded findings. Identifies compound attacks and blind spots. Assembles final report.
+`personas/` holds optional voices for the logbook each session keeps (`[personas]` in
+`bulwark.toml` maps a stage to one). `_logbook.md` is the shared instruction: status lines, not
+reasoning. A persona changes tone only, never what a session must do.
