@@ -71,17 +71,33 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
         }
     }
 
+    set_aside_previous_findings(ctx, agent_filter)?;
+
+    // Forge only runs tests under the project's test directory; the prompts name `test/scratch/`.
+    let scratch = scratch_dir(ctx);
+    let scratch_rel = format!(
+        "{}/",
+        scratch
+            .strip_prefix(&ctx.audit_dir)
+            .unwrap_or(&scratch)
+            .display()
+    );
+    let localise = |p: String| p.replace("test/scratch/", &scratch_rel);
+
     let mut jobs: Vec<Job> = Vec::new();
     for agent in &agents {
         jobs.push(Job {
             name: agent.clone(),
-            prompt: std::fs::read_to_string(ctx.resolve_prompt_path(&format!("{agent}-agent.md")))?
-                + &ctx.persona_section(agent),
+            prompt: localise(std::fs::read_to_string(
+                ctx.resolve_prompt_path(&format!("{agent}-agent.md")),
+            )?) + &ctx.persona_section(agent),
             model: ctx.config.model_for(agent),
         });
     }
     if agent_filter.is_none() && !ctx.config.passes.agents.components.is_empty() {
-        let hunter = std::fs::read_to_string(ctx.resolve_prompt_path("hunter-agent.md"))?;
+        let hunter = localise(std::fs::read_to_string(
+            ctx.resolve_prompt_path("hunter-agent.md"),
+        )?);
         for c in &ctx.config.passes.agents.components {
             let name = format!("hunt-{}", c.name);
             jobs.push(Job {
@@ -212,7 +228,6 @@ pub async fn run(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<St
     }
 
     // Agents' experiments would break every later build if one fails to compile; keep them for triage.
-    let scratch = ctx.build_dir().join("test/scratch");
     if scratch.exists() {
         let kept = ctx.workspace.findings_dir().join("agent-tests");
         let _ = std::fs::remove_dir_all(&kept);
@@ -565,4 +580,133 @@ fn merge_agent_outputs(ctx: &PipelineContext, agents: &[String]) -> Result<merge
     std::fs::write(&merged_path, content)?;
 
     Ok(result)
+}
+
+fn scratch_dir(ctx: &PipelineContext) -> std::path::PathBuf {
+    let build = ctx.build_dir();
+    build
+        .join(crate::tools::forge::test_dir(&build))
+        .join("scratch")
+}
+
+/// An agent must never read another run's conclusions, so the previous run's Pass 2 output
+/// moves outside the audit directory. A single-agent rerun moves only that agent's files.
+fn set_aside_previous_findings(ctx: &PipelineContext, agent_filter: Option<&str>) -> Result<()> {
+    let findings = ctx.workspace.findings_dir();
+    if !findings.exists() {
+        return Ok(());
+    }
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let repo = ctx
+        .audit_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "audit".into());
+    let parent = ctx.audit_dir.parent().unwrap_or(&ctx.audit_dir);
+    let dest = parent
+        .join(".previous")
+        .join(format!("{repo}-findings-{stamp}"));
+
+    let moved = match agent_filter {
+        None => {
+            std::fs::create_dir_all(dest.parent().unwrap_or(parent))?;
+            std::fs::rename(&findings, &dest)?;
+            let scratch = scratch_dir(ctx);
+            if scratch.exists() {
+                std::fs::rename(&scratch, dest.join("scratch"))?;
+            }
+            true
+        }
+        Some(agent) => {
+            let prefix = format!("{}-", agent.to_lowercase());
+            let mut any = false;
+            for dir in [findings.clone(), ctx.workspace.findings_logs_dir()] {
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name.starts_with(&prefix) && entry.path().is_file() {
+                        let to = dest.join(dir.strip_prefix(&findings).unwrap_or(Path::new("")));
+                        std::fs::create_dir_all(&to)?;
+                        std::fs::rename(entry.path(), to.join(&name))?;
+                        any = true;
+                    }
+                }
+            }
+            any
+        }
+    };
+    std::fs::create_dir_all(ctx.workspace.findings_logs_dir())?;
+    if moved {
+        eprintln!(
+            "  {} Previous Pass 2 output moved to {}",
+            style("→").cyan(),
+            dest.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod set_aside_tests {
+    use super::*;
+
+    fn ctx(audit: &Path) -> PipelineContext {
+        let config: crate::config::Config =
+            toml::from_str("[target]\nrepo = \"x\"\nscope = [\".\"]\ncore_contracts = []\n")
+                .unwrap();
+        let workspace = crate::workspace::Workspace::new(audit, "ws");
+        workspace.init().unwrap();
+        let ledger = crate::budget::Ledger::open(workspace.cost_ledger(), None, true).unwrap();
+        PipelineContext {
+            config,
+            workspace,
+            audit_dir: audit.to_path_buf(),
+            bulwark_root: audit.to_path_buf(),
+            bulwark_install: audit.to_path_buf(),
+            ledger,
+        }
+    }
+
+    #[test]
+    fn full_run_starts_from_an_empty_findings_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let audit = root.path().join("target");
+        let ctx = ctx(&audit);
+        let f = ctx.workspace.findings_dir();
+        std::fs::write(f.join("gold-agent-raw.json"), "[]").unwrap();
+        std::fs::create_dir_all(audit.join("test/scratch")).unwrap();
+        set_aside_previous_findings(&ctx, None).unwrap();
+        assert_eq!(
+            std::fs::read_dir(&f).unwrap().count(),
+            1,
+            "only logs/ is left"
+        );
+        assert!(!audit.join("test/scratch").exists());
+        let prev = std::fs::read_dir(root.path().join(".previous"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert!(prev.join("gold-agent-raw.json").exists() && prev.join("scratch").exists());
+    }
+
+    #[test]
+    fn single_agent_rerun_moves_only_that_agent() {
+        let root = tempfile::tempdir().unwrap();
+        let audit = root.path().join("target");
+        let ctx = ctx(&audit);
+        let f = ctx.workspace.findings_dir();
+        std::fs::write(f.join("gold-agent-raw.json"), "[]").unwrap();
+        std::fs::write(f.join("red-agent-raw.json"), "[]").unwrap();
+        std::fs::write(ctx.workspace.findings_logs_dir().join("gold-agent.log"), "").unwrap();
+        set_aside_previous_findings(&ctx, Some("gold")).unwrap();
+        assert!(!f.join("gold-agent-raw.json").exists());
+        assert!(f.join("red-agent-raw.json").exists());
+        assert!(
+            !ctx.workspace
+                .findings_logs_dir()
+                .join("gold-agent.log")
+                .exists()
+        );
+    }
 }
