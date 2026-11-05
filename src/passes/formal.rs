@@ -186,14 +186,23 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let has_real_counterexample = (combined.contains("Counterexample")
                 || combined.contains("counterexample"))
                 && !combined_lower.contains("counterexample: unknown");
+            let candidate_paths = candidate_paths(&combined);
             let status = if has_real_counterexample {
                 eprintln!(
                     "    {} {prop}: VIOLATED — counterexample found ({duration}s)",
                     style("⚠").yellow()
                 );
                 "VIOLATED"
-            } else if combined_lower.contains("timeout") {
-                eprintln!("    {prop}: TIMEOUT after {duration}s");
+            } else if killed_by_timeout(output.status.code()) || combined_lower.contains("timeout")
+            {
+                if candidate_paths > 0 {
+                    eprintln!(
+                        "    {} {prop}: TIMEOUT after {duration}s with {candidate_paths} unconfirmed candidate path(s), worth a manual look",
+                        style("?").yellow()
+                    );
+                } else {
+                    eprintln!("    {prop}: TIMEOUT after {duration}s");
+                }
                 "TIMEOUT"
             } else if combined.contains("Verified")
                 || combined.contains("passed")
@@ -268,6 +277,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
                     "status": status,
                     "duration": duration,
                     "counterexample": if counterexample.is_empty() { Value::Null } else { json!(counterexample) },
+                    "candidate_paths": candidate_paths,
                     "loop_bound": loop_bound,
                 }),
             );
@@ -564,6 +574,18 @@ fn patch_bare_check_names(dir: &Path) {
     }
 }
 
+/// `timeout` exits 124 when it kills the command; 137 if it had to SIGKILL.
+fn killed_by_timeout(code: Option<i32>) -> bool {
+    matches!(code, Some(124) | Some(137))
+}
+
+/// Paths Halmos flagged for the solver but had not confirmed or refuted when it stopped.
+fn candidate_paths(log: &str) -> usize {
+    log.lines()
+        .filter(|l| l.contains("Found potential path"))
+        .count()
+}
+
 /// Ensure formal_dir has a valid foundry.toml for standalone Halmos execution.
 /// The AI sometimes generates one with full remappings, sometimes skips it entirely.
 /// We create a minimal self-sufficient config if absent, or patch evm_version if present.
@@ -642,4 +664,18 @@ fn read_foundry_out_dir(build_dir: &Path) -> String {
         }
     }
     "out".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_killed_run_is_a_timeout_and_counts_its_candidates() {
+        let log = "Found potential path with path_id=997 Panic(0x01)\n\
+                   Found potential path with path_id=900 Panic(0x01)\n  Checking with external solver process\n";
+        assert!(killed_by_timeout(Some(124)) && killed_by_timeout(Some(137)));
+        assert!(!killed_by_timeout(Some(1)) && !killed_by_timeout(None));
+        assert_eq!(candidate_paths(log), 2);
+    }
 }
