@@ -210,6 +210,23 @@ impl Orchestrator {
         }
 
         self.print_summary(&results, pipeline_start.elapsed().as_secs());
+        match crate::submission::write_all(
+            &self.ctx.config,
+            &self.ctx.audit_dir,
+            self.ctx.workspace.root(),
+        ) {
+            Ok(drafts) if !drafts.is_empty() => eprintln!(
+                "  {} {} submission draft(s) in {}",
+                style("✓").green(),
+                drafts.len(),
+                self.ctx.workspace.root().join("submissions").display()
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!(
+                "  {} Submission drafts not written: {e}",
+                style("⚠").yellow()
+            ),
+        }
         self.export_reports_to_host();
         Ok(results)
     }
@@ -236,6 +253,17 @@ impl Orchestrator {
         if json_src.exists() {
             let dest = reports_dir.join(format!("audit-report-{timestamp}.json"));
             if std::fs::copy(&json_src, &dest).is_ok() {
+                copied.push(dest);
+            }
+        }
+
+        let drafts = self.ctx.workspace.root().join("submissions");
+        if drafts.is_dir() {
+            let dest = reports_dir.join(format!("submissions-{timestamp}"));
+            if std::fs::create_dir_all(&dest).is_ok() {
+                for e in std::fs::read_dir(&drafts).into_iter().flatten().flatten() {
+                    let _ = std::fs::copy(e.path(), dest.join(e.file_name()));
+                }
                 copied.push(dest);
             }
         }

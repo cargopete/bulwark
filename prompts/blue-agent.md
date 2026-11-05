@@ -144,6 +144,7 @@ The array should contain TWO types of entries:
   "lines": [42, 67],
   "property_violated": "P-10",
   "attack_scenario": "3-sentence attack scenario",
+  "recommendation": "The fix, one or two sentences: what to change and where.",
   "poc_file": null,
   "poc_status": "not_attempted",
   "dedup_hash": ""

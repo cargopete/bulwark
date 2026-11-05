@@ -26,6 +26,9 @@ pub struct ProgramConfig {
     pub assets: Vec<Asset>,
     #[serde(default)]
     pub impacts: Vec<Impact>,
+    /// Maximum payout per severity from the program page, e.g. `High = 15000`.
+    #[serde(default)]
+    pub rewards: std::collections::BTreeMap<String, u64>,
     #[serde(default)]
     pub out_of_scope: OutOfScope,
 }

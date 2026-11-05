@@ -42,8 +42,12 @@
     },
     "property_violated": {
       "type": ["string", "null"],
-      "pattern": "^P-[0-9]{1,2}$",
-      "description": "Reference to PROPERTIES.md (P-1 through P-22)"
+      "pattern": "^P-[A-Za-z0-9._-]+$",
+      "description": "A property ID from PROPERTIES.md, e.g. P-3 or P-T2"
+    },
+    "recommendation": {
+      "type": "string",
+      "description": "The fix: what to change and where"
     },
     "attack_scenario": {
       "type": "string",

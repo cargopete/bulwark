@@ -95,6 +95,10 @@ pub struct FindingsArgs {
     #[arg(long, short)]
     pub severity: Option<String>,
 
+    /// Show what the scope gate, the duplicate filter and the PoC gate threw away, with reasons
+    #[arg(long)]
+    pub rejected: bool,
+
     /// Output as JSON
     #[arg(long)]
     pub json: bool,

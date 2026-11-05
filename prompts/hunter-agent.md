@@ -72,6 +72,7 @@ Write findings as a JSON array to the findings path in the runtime instructions.
   "lines": [42, 67],
   "property_violated": "P-10 | null",
   "attack_scenario": "WHO does WHAT, in which order, to gain or break WHAT. Exact calls and amounts.",
+  "recommendation": "The fix, one or two sentences: what to change and where.",
   "poc_file": "test/scratch/... if you wrote one, else null",
   "poc_status": "not_attempted",
   "dedup_hash": ""
