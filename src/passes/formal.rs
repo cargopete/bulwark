@@ -168,7 +168,7 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
             let feedback = format!(
                 "\n\n## REPAIR: the real-contract tests did not run\n\n\
                  Fix the files in the real-contract directory in place, then check each one with \
-                 `halmos --contract <C> --function <prefix>` before you finish. Do not touch the \
+                 `FOUNDRY_DYNAMIC_TEST_LINKING=false halmos --contract <C> --function <prefix>` before you finish. Do not touch the \
                  model directory.\n\n{evidence}"
             );
             generate_symbolic_tests(
@@ -357,7 +357,14 @@ async fn run_halmos(
     let total = (s.solver_timeout * 3 + 60).to_string();
     let solver = solver_timeout_arg(s.solver_timeout);
     let loop_bound = s.loop_bound.to_string();
-    let mut args: Vec<&str> = vec![&total, halmos.to_str().unwrap_or("halmos")];
+    // Forge 1.x rewrites `new X(..)` in tests into vm.deployCode, which Halmos does not support,
+    // so every setUp() that deploys a project contract would fail.
+    let mut args: Vec<&str> = vec![
+        NO_TEST_LINKING,
+        "timeout",
+        &total,
+        halmos.to_str().unwrap_or("halmos"),
+    ];
     if let Some(c) = contract {
         args.extend(["--contract", c]);
     }
@@ -376,7 +383,7 @@ async fn run_halmos(
     args.push("-vvv");
 
     let start = std::time::Instant::now();
-    let output = crate::tools::run_command("timeout", &args, dir).await?;
+    let output = crate::tools::run_command("env", &args, dir).await?;
     let duration = start.elapsed().as_secs();
     let combined = format!(
         "{}\n{}",
@@ -962,6 +969,8 @@ fn tail(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
 }
+
+const NO_TEST_LINKING: &str = "FOUNDRY_DYNAMIC_TEST_LINKING=false";
 
 /// Halmos 0.3 reads a bare number as milliseconds, so `300` gave the solver 0.3s.
 fn solver_timeout_arg(secs: u64) -> String {

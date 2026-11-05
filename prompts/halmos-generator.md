@@ -78,8 +78,10 @@ Rules for this layer:
    example the fuzzing pass's files in the test directory) deploys with `deployCode`, write your
    own `setUp()` rather than inheriting it.
 7. **Check it runs before you finish.** From the build directory named below, run `forge build`,
-   then run each check once with a short bound:
-   `halmos --contract SymbolicVault --function check_PV3_ --loop 2 --solver-timeout-assertion 60`.
+   then run each check once with a short bound, exactly as the pipeline will:
+   `FOUNDRY_DYNAMIC_TEST_LINKING=false halmos --contract SymbolicVault --function check_PV3_ --loop 2 --solver-timeout-assertion 60s`.
+   Without that variable, forge rewrites `new X(...)` into `vm.deployCode`, which Halmos does
+   not support. With it, plain `new` of the project's contracts works; no aliasing is needed.
    A check that reports no paths, or errors before exploring, is not done. Fix it, or say in the
    assessment why it cannot run.
 
