@@ -58,8 +58,12 @@ queue)
     while :; do
         for c in $(docker ps -a --filter name=^bench- --filter status=exited --format '{{.Names}}'); do
             id=${c#bench-}
-            if [ -d "bench/cases/$id" ] && ! scored "$id"; then
-                log "scoring $id (exit $(docker inspect -f '{{.State.ExitCode}}' "$c"))"
+            code=$(docker inspect -f '{{.State.ExitCode}}' "$c")
+            if [ "$code" -ge 128 ]; then
+                # Stopped by a signal: not a result. Removing it puts the case back in the queue.
+                log "not scoring $id (killed, exit $code)"
+            elif [ -d "bench/cases/$id" ] && ! scored "$id"; then
+                log "scoring $id (exit $code)"
                 docker logs "$c" > "bench/runs/$id-$label.log" 2>&1 || true
                 "$0" score "$id" "$label" || log "scoring $id failed"
             fi
