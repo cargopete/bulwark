@@ -119,6 +119,9 @@ pub async fn run(ctx: &PipelineContext) -> Result<String> {
         solver_timeout,
         loop_bound,
     };
+    // The generator's own trial runs can outlive its session and hold the CPU for hours.
+    let _ =
+        crate::tools::run_command("pkill", &["-KILL", "-f", "bin/halmos"], &ctx.audit_dir).await;
     eprintln!("  Running Halmos (solver-timeout={solver_timeout}s, loop={loop_bound})...\n");
 
     // ── Step 3a: real layer, with one repair round ──────────────────
@@ -362,6 +365,9 @@ async fn run_halmos(
     let mut args: Vec<&str> = vec![
         NO_TEST_LINKING,
         "timeout",
+        // Halmos ignores SIGTERM while the solver runs; without a KILL the cap never lands.
+        "-k",
+        "60",
         &total,
         halmos.to_str().unwrap_or("halmos"),
     ];
